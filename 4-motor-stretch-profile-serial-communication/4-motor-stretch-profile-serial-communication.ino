@@ -27,30 +27,36 @@ float speedPhase[4][5] = {
 
 elapsedMicros timers[4];
 elapsedMicros timerSerial;
-boolean inWaiting[4] = {HIGH, HIGH, HIGH, HIGH};
+boolean inWaiting[4] = {HIGH, HIGH, HIGH, HIGH}; // HIGH to wait
 boolean resetFlag[4] = {LOW, LOW, LOW, LOW};
+boolean manualMotor[4] = {LOW, LOW, LOW, LOW};
+
 uint32_t waitTime[4] = {0, 0, 0, 0};
 
 boolean firstCycle[4] = {HIGH, HIGH, HIGH, HIGH};
 String val;
 
-boolean motorState[4] = {HIGH, HIGH, HIGH, HIGH};
-const int STEP[4] = {22, 21, 20, 19};
-const int DIR[4] = {17, 16, 15, 14};
-const int EN[4] = {5, 4, 3, 2};
-long motorDistances[4] = {20, 20, 20, 20};
+boolean motorState[4] = {HIGH, HIGH, HIGH, HIGH}; boolean C_State = LOW;
+const int STEP[4] = {23, 22, 21, 20}; const int C_STEP = 19;
+const int DIR[4] = {18, 17, 16, 15}; const int C_DIR = 14;
+const int EN[4] = {6, 5, 4, 3}; const int C_EN = 2;
+long motorDistances[4] = {20, 20, 20, 20}; int C_Position = 0;
 long locationPhase[4][5] = {
   {0, motorDistances[0], motorDistances[0], 0, 0},
-  {0, motorDistances[1], motorDistances[1], 0, 0}, 
-  {0, motorDistances[2], motorDistances[2], 0, 0}, 
+  {0, motorDistances[1], motorDistances[1], 0, 0},
+  {0, motorDistances[2], motorDistances[2], 0, 0},
   {0, motorDistances[3], motorDistances[3], 0, 0},
 };
 AccelStepper *stArray[4];
+AccelStepper stCamera(1, C_STEP, C_DIR);
 
-const int MS1 = 8; int MSVal1 = LOW;
-const int MS2 = 9; int MSVal2 = LOW;
+const int MS1 = 11; int MSVal1 = HIGH;
+const int MS2 = 12; int MSVal2 = HIGH;
+const int PFD = 7; int PFDVal = HIGH;
+const int RST = 8; int RSTVal = HIGH;
+const int SLP = 9; int SLPVal = HIGH;
 
-
+int CameraLocations[4] = {-20000, -50000, -80000, -120000};
 
 void setup() {
 
@@ -66,7 +72,7 @@ void setup() {
     stArray[st]->setAcceleration(100000);
 
     pinMode(EN[st], OUTPUT); digitalWrite(EN[st], motorState[st]);
-
+    
     for (int ii = 1; ii < 3; ii++) {
       locationPhase[st][ii] = motorDistances[st];
     }
@@ -88,29 +94,119 @@ void setup() {
 
   }
 
+  stCamera.setMaxSpeed(5000);
+  stCamera.setAcceleration(100000);
+  
   pinMode(MS1, OUTPUT); digitalWrite(MS1, MSVal1);
   pinMode(MS2, OUTPUT); digitalWrite(MS2, MSVal2);
+  pinMode(RST, OUTPUT); digitalWrite(RST, !RSTVal);
+  pinMode(PFD, OUTPUT); digitalWrite(PFD, PFDVal);
+  pinMode(SLP, OUTPUT); digitalWrite(SLP, !SLPVal);
 
-
+  pinMode(C_EN, OUTPUT); digitalWrite(C_EN, C_State);
 
 }
 
 void loop() {
   ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // SERIAL COMMANDS FROM PYTHON4
-  // TAKEN COMMAND letters: W (enable/disable), R (reset), F (frequency change), D (distance change), A (adjust motor position), S (waveform change)
+  // TAKEN COMMAND letters:
+  //        W: enable/disable
+  //        R: reset
+  //        F: frequency change
+  //        D: distance change
+  //        A: adjust motor position
+  //        S: waveform change
 
   ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   if (Serial.available() > 0) {
     val = Serial.readString();
-    if (val.substring(0, 1) == "Q") {
+    Serial.println(val);
+    if (val.equals("Python Connection Established!\n")) { // establish connection
+      Serial.println("Arduino Connection Established!");
       for (int st = 0; st < 4; st++) {
-        motorState[st] = LOW;
+        motorState[st] = HIGH;
         inWaiting[st] = HIGH;
-        resetFlag[st] = HIGH;
+        resetFlag[st] = LOW;
+        waitTime[st] = 0;
+        digitalWrite(EN[st], motorState[st]);
+      }
+    }
+    if (val.substring(0, 1) == "X") {
+      for (int st = 0; st < 4; st++) { // enable all motors
+        motorState[st] = LOW;
+        inWaiting[st] = LOW;
+        resetFlag[st] = LOW;
+        waitTime[st] = timers[st];
+        digitalWrite(EN[st], motorState[st]);
+
+        stArray[st]->setMaxSpeed(1000); // quickly retract
+        stArray[st]->moveTo(-2000); // retract arbitrarily high amount
+
+      }
+      int sumDistancesToGo = 0;
+      for (int st = 0; st < 4; st++) {
+        sumDistancesToGo += stArray[st]->distanceToGo();
+      }
+
+      while (sumDistancesToGo != 0) { // retract all motors
+        sumDistancesToGo = 0;
+        for (int st = 0; st < 4; st++) {
+          sumDistancesToGo += stArray[st]->distanceToGo();
+          stArray[st]->run();
+        }
+      }
+
+      for (int st = 0; st < 4; st++) { // enable all motors
+        motorState[st] = HIGH;
+        inWaiting[st] = HIGH;
+        resetFlag[st] = LOW;
+        waitTime[st] = timers[st];
+        digitalWrite(EN[st], motorState[st]);
+
+      }
+    }
+
+    if (val.substring(0, 1) == "B") { // quit program
+      
+      for (int st = 0; st < 4; st++) {
+        motorState[st] = HIGH;
+        inWaiting[st] = HIGH;
+        resetFlag[st] = LOW;
+        waitTime[st] = 0;
+        digitalWrite(EN[st], HIGH);
+        stArray[st]->setCurrentPosition(0);
+      }
+      digitalWrite(RST, RSTVal);
+      digitalWrite(SLP, SLPVal);
+      digitalWrite(C_EN, HIGH);
+
+      stCamera.moveTo(120000); // move camera to starting point
+      while (stCamera.distanceToGo() != 0) {
+        if (timerSerial > 10 * 1000) {
+            Serial.println(stCamera.distanceToGo());
+         }
+        stCamera.run();
+      }
+      stCamera.setCurrentPosition(0); // reset as 0 point
+      stCamera.moveTo(CameraLocations[C_Position]);
+      while (stCamera.distanceToGo() != 0) {
+        stCamera.run();
+        if (timerSerial > 10 * 1000) {
+            Serial.println(stCamera.currentPosition());
+         }
+      }
+      Serial.println("Ready");
+    } if (val.substring(0, 1) == "Q") { // quit program
+      for (int st = 0; st < 4; st++) {
+        motorState[st] = HIGH;
+        inWaiting[st] = HIGH;
+        resetFlag[st] = LOW;
         waitTime[st] = 0;
         digitalWrite(EN[st], LOW);
       }
+      digitalWrite(RST, !RSTVal);
+      digitalWrite(SLP, !SLPVal);
     } else if (val.substring(0, 1) == "R") {
       for (int st = 0; st < 4; st++) {
         motorState[st] = LOW;
@@ -170,44 +266,74 @@ void loop() {
           speedPhase[st][1] = 0;
         }
       }
-      Serial.print(speedPhase[0][0]);
-      Serial.print(',');
-      Serial.print(speedPhase[0][1]);
-      Serial.print(',');
-      Serial.print(speedPhase[0][2]);
-      Serial.print(',');
-      Serial.print(speedPhase[0][3]);
-      Serial.print(',');
-      Serial.print(speedPhase[0][4]);
-      Serial.println();
     }
-    if (val.substring(0, 1).toInt() > 0) {
+
+
+    
+    if (val.substring(0, 1).toInt() > 0) { // individual motor control
       int st = val.substring(0, 1).toInt();
       st = st - 1;
-      if (val.substring(1, 2) == "W") { ///////////// TOGGLE MOTOR STATE ////////////
-        motorState[st] = !motorState[st];
-        inWaiting[st] = !inWaiting[st];
-        waitTime[st] = timers[st];
-        digitalWrite(EN[st], motorState[st]);
-        //Serial.println('D');
-      } else if (val.substring(1, 2) == "R") {
+      if (val.substring(1, 2) == "C") {
+        C_Position = st;
+        C_State = LOW; // enable camera motor
+        stCamera.moveTo(CameraLocations[C_Position]);
+      }
+      if (val.substring(1, 2) == "S") { // reset motor position to 0
+        if (motorState[st] == HIGH) { 
+          stArray[st]->setCurrentPosition(0);
+        }
+      }
+      if (val.substring(1, 2) == "M") { // manual motor control
+        waitTime[st] = 0;
+        inWaiting[st] = HIGH;
         motorState[st] = LOW;
+        manualMotor[st] = HIGH;
+        digitalWrite(EN[st], motorState[st]);
+
+
+        int newMotorPosition = val.substring(2, val.length() - 1).toInt();
+        Serial.println(val.substring(2, val.length() - 1));
+
+        stArray[st]->moveTo(newMotorPosition);
+        stArray[st]->setMaxSpeed(5000);
+
+
+      }
+      if (val.substring(1, 2) == "W") { // toggle motor state
+        if (motorState[st] == LOW) { // if already on, turn off and reset
+          motorState[st] = LOW;
+          inWaiting[st] = HIGH;
+          resetFlag[st] = HIGH;
+          waitTime[st] = 0;
+          // motorState will go HIGH in reset loop
+        } else { // if already off, turn on
+          motorState[st] = LOW;
+          inWaiting[st] = LOW;
+          waitTime[st] = 0;
+        }
+        digitalWrite(EN[st], motorState[st]);
+        if (manualMotor[st] == HIGH) { // if was recently in manual state, reset
+          stArray[st]->setCurrentPosition(0);
+          inWaiting[st] = LOW;
+          motorState[st] = LOW;
+          waitTime[st] = 0;
+          manualMotor[st] = LOW;
+
+          Serial.print("RESET:");
+          Serial.println(st);
+        }
+        
+
+      } else if (val.substring(1, 2) == "R") { // reset motor
+
+        motorState[st] = LOW;
+        manualMotor[st] = LOW;
         inWaiting[st] = HIGH;
         resetFlag[st] = HIGH;
         waitTime[st] = 0;
         digitalWrite(EN[st], LOW);
-        //Serial.println('D');
 
-        //////////////////////////////////////////////////
-        // CHANGE FREQUENCY OF ANY MOTOR
-        //////////////////////////////////////////////////
       } else if (val.substring(1, 2) == "F") {
-        //motorState[st] = LOW;
-        //inWaiting[st] = HIGH;
-        //resetFlag[st] = HIGH;
-        //waitTime[st] = 0;
-        //digitalWrite(EN[st], LOW);
-
         float newFreq = val.substring(2, val.length() - 1).toFloat();
         Serial.println(val.substring(2, val.length() - 1));
 
@@ -223,12 +349,6 @@ void loop() {
         speedPhase[st][3] = (locationPhase[st][4] - locationPhase[st][3]) / ((ts[st][4] - ts[st][3]) / 1e6); // RELAX
 
       } else if (val.substring(1, 2) == "D") { // new motor distance
-        //motorState[st] = LOW;
-        //inWaiting[st] = HIGH;
-        //resetFlag[st] = HIGH;
-        //waitTime[st] = 0;
-        //digitalWrite(EN[st], LOW);
-
         float newDistance = val.substring(2, val.length() - 1).toFloat();
         Serial.println(val.substring(2, val.length() - 1));
 
@@ -244,8 +364,8 @@ void loop() {
       } else if (val.substring(1, 2) == "A") {
         Serial.println(val);
         digitalWrite(EN[st], LOW);
-        digitalWrite(MS1, HIGH); digitalWrite(MS2, HIGH);
-        if ((inWaiting[st] == HIGH) && (stArray[st]->currentPosition() == 0)) {
+        digitalWrite(MS1, MSVal1); digitalWrite(MS2, MSVal2);
+        if ((inWaiting[st] == HIGH) && (stArray[st]->currentPosition() == 0)) { // only move when in waiting
           int adjustValue = val.substring(2, val.length() - 1).toFloat();
           Serial.println(adjustValue);
           switch (adjustValue) {
@@ -276,22 +396,12 @@ void loop() {
 
   // LOOP THROUGH EACH STEPPER MOTOR
   for (int st = 0; st < 4; st++) { // loop through each stepper motor
-    if (inWaiting[st]) {
+    if (inWaiting[st]) { // if waiting, hold at wait time
       timers[st] = waitTime[st];
     }
     if (timers[st] > period[st]) {
       timers[st] = 0;
     }
-
-    //    Serial.print(st);
-    //    Serial.print(": ");
-    //    if (motorState[st]) {
-    //      Serial.print("off,");
-    //    } else {
-    //      Serial.print("on,");
-    //    }
-    //Serial.print(motorState[st]); // print motor enable state
-    //Serial.print(',');
 
     if (firstCycle[st]) { // if this is the first cycle, need to set t_start to current time
       timers[st] = 0;
@@ -305,20 +415,25 @@ void loop() {
 
     if (motorState[st] == LOW) {
       if (resetFlag[st] == HIGH) {
-        stArray[st]->setMaxSpeed(500);
+        stArray[st]->setMaxSpeed(2000);
         stArray[st]->moveTo(0);
         stArray[st]->run();
         if (stArray[st]->distanceToGo() == 0) {
           motorState[st] = HIGH; // disable motor
-          inWaiting[st] = HIGH; // reset waiting timer
-          resetFlag[st] = LOW;    // set flag back to 0
+          inWaiting[st] = HIGH; // raise waiting flag
+          resetFlag[st] = LOW;    // set reset flag back to 0
           timers[st] = 0; // reset timer
           digitalWrite(EN[st], motorState[st]);
         }
-      } else {
+      } else if (manualMotor[st] == LOW) {
         stArray[st]->setMaxSpeed(abs(speedPhase[st][inPhase - 1]));
         stArray[st]->moveTo(locationPhase[st][inPhase]);
         stArray[st]->run();
+      } else {
+        stArray[st]->run();
+        //        if (stArray[st]->distanceToGo() == 0) {
+        //          manualMotor[st] = LOW;
+        //        }
       }
     }
 
@@ -331,9 +446,19 @@ void loop() {
   //  Serial.print(',');
 
   //delay(100);
+  if (C_State == HIGH) {
+    stCamera.run();
+    if (stCamera.distanceToGo() == 0) {
+      C_State = LOW;
+    }
+  }
   if (timerSerial > 10 * 1000) {
+    Serial.print("POSITIONS:");
     for (int st = 0; st < 4; st++) {
+      //      Serial.print(motorState[st]);
       Serial.print(stArray[st]->currentPosition());
+      //      Serial.print(stArray[st]->speed());
+      //      Serial.print(timers[st]);
       Serial.print(",");
     }
     Serial.println(' ');
