@@ -5,62 +5,68 @@ from time import time
 
 import serial.tools.list_ports
 ports = serial.tools.list_ports.comports()
+port = 'COM4'
 ser = -1
+cameraLocations = [2000, 33000, 64000, 95000]
+comportEstablishedFlag = False
 def EstablishConnection():   
     ports = serial.tools.list_ports.comports() # get all ports available
     
+    global port
     global comportEstablishedFlag # flag whether port has been established
     global ser 
     ser = -1
 
     # if there are no ports, exit
     if len(ports) == 0:
-        print("No serial ports found.")
-        input("Press Any Key to exit program.")
+        print("No serial ports found. Exiting.")
         return
-    
+
+    comportEstablishedFlag = False
     for port, desc, hwid in sorted(ports): # loop through each COM port
-        t = time()
+        
+        
         print('Trying '+port)
         timeoutErrorFlag = False
         try: 
-            ser = Serial(port, baudrate=9600, timeout=0) # try to establish serial connection with com port
+            ser = Serial(port, baudrate=9600, timeout=1) # try to establish serial connection with com port
             ser.flushInput()
             ser.write("Python Connection Established!\n".encode()) # send string
-            
-            # get response from Arduino
-            response = ''
-            numLines = 0
-            # read one line at a time, first one available in the serial buffer
-            while True:
-                response += ser.read().decode("utf-8")
-                if ('\n' in response): # add to number of lines
-                    numLines = numLines + 1 
-                if (numLines >= 1): # if number of lines is greater than 1, break out
-                    break
-                if time() >= t + 5: # timeout error
-                    print("No Response. Trying another port, or exiting.")
-                    timeoutErrorFlag = True
-                    t = time()
-                    while time() <= t+1:
-                        a=2
-                    break
-
-            if response == 'Arduino Connection Established!\r\n': # correct handshake
+            response = ser.readline().decode('utf-8')
+            if '\n' in response:
+                inputRecieved = True
+            print(response)
+            if not inputRecieved:
+                comportEstablishedFlag = False
+                print('No response. Trying another port, or exiting.')
+                print('Incorrect or no response.  Trying another port, or exiting.')
+                continue
+            if inputRecieved and response != 'Arduino Connection Established!\n':
+                comportEstablishedFlag = False
+                print('Incorrect Response. Trying another port, or exiting.')
+                continue
+            elif response == 'Arduino Connection Established!\n':
                 comportEstablishedFlag = True
                 print('Connection Established ('+port+').')
-            if response != 'Arduino Connection Established!\r\n' and not timeoutErrorFlag: # incorrect handshake, but no timeout error
-                comportEstablishedFlag = False
-                print('Incorrect Response. Tring another port, or exiting.')
+                break
 
             if comportEstablishedFlag == True: # break out if flag
                 break
         except: 
-            
             continue
     
     return ser
 
+def sendRecieveHandshake():
+    global ser
+    ser.flushInput()
+    ser.write("Python handshake.\n".encode()) # send string`    `       `````````````   `
+    top.after(1)
+    response = ser.readline().decode('utf-8')
+    if '\n' in response:
+        inputRecieved = True
+    print(response[:-2], end='')
+    pass
 ser = EstablishConnection()
 
 # create GUI
@@ -71,16 +77,18 @@ positions = [tk.StringVar(top, '0'),
              tk.StringVar(top, '0'),
              tk.StringVar(top, '0'),
              tk.StringVar(top, '0')]
+cameraPosition = tk.StringVar(top, '1')
 
 labels = [tk.Label(top, textvariable=positions[0], bg='white'),
           tk.Label(top, textvariable=positions[1], bg='white'),
           tk.Label(top, textvariable=positions[2], bg='white'),
           tk.Label(top, textvariable=positions[3], bg='white')]
 
-distances = [tk.StringVar(top, '20'), #row A
-             tk.StringVar(top, '20'),
-             tk.StringVar(top, '20'),
-             tk.StringVar(top, '20')   
+
+distances = [tk.StringVar(top, '200'), #row A
+             tk.StringVar(top, '200'),
+             tk.StringVar(top, '200'),
+             tk.StringVar(top, '200')   
             ]
 
 frequencies = [tk.StringVar(top, '1'), 
@@ -100,41 +108,53 @@ m = [tk.StringVar(top, '0'),
      ]
 
 # update GUI based on serial input
+t_handshake = time()
 def update():
+    global ser
+    global t_handshake
+    # if comportEstablishedFlag:
+    if time() > t_handshake+10:
+        # print()
+        # print("Sent handshake... ", end='')
+        sendRecieveHandshake()
+        t_handshake=time()
     response = ''
-    numLines = 0
-    t = time()
-    while True:
-        try:
-            response += ser.read().decode("utf-8")
-        except SerialException as e:
-            response = 'Serial input error.'
-        if ('\n' in response):
-                numLines = numLines + 1
-        if (numLines >= 1):
-            break
-        if time() > t + 1:
-            response = 'no response\n'
-            break
-    print(response)
-    pos = response[10:].split(',')
+    try:
+        if ser.in_waiting > 0:
+            # print('Input recieved: ', end='')
+            response = ser.readline().decode('utf-8')
+            # print(str(time())+':', end='')
+            print(response, end='                                                                     \033[F')
+            # print(response, end='                                                    \r')
+            ser.flushInput()
+        else:
+            pass
+            
+    except SerialException as e:
+        response = 'Serial input error.'
+    if ('\n' in response):
+        lineRecieved = True
+
     #print(response[:10])
     # print(pos)
+    
     if response[:6] == 'RESET:':
         value = response[6:-1]
         # print(value+'\n')
         m[int(value)].set(0)
         M[int(value)].set(0)
     if response[:10]== 'POSITIONS:': # only update if correct line comes back
-        values = response[10:-4].split(',') # split based on delimiter
-        # print('\r', end='')
-        # print(values, end='')
-        # print('                           ', end='')
-        if len(values) == 4: # only if the length of what comes back is 4
-            for ii in range(4):
-                positions[ii].set(float(values[ii])) # set position value
-                labels[ii].update() # update label
+        values = response[10:-2].split(';') # split based on delimiter
+        print(values, end='                                           \r')
         
+        if len(values) == 5: # only if the length of what comes back is 5
+            for ii in range(4):
+                positions[ii].set(float(values[ii].split(',')[1])) # set position value
+                labels[ii].update() # update label
+            cameraPosition.set(float(values[4]))
+                
+                
+    
     #print(' ')  
     # ser.flushInput()
     top.after(1, update)
@@ -142,9 +162,9 @@ def update():
 # threading.Thread(target=update()).start() # run update function in background
 
 def toggleState(a='R'):
-    
+    # if comportEstablishedFlag:
     ser.write((a+'\n').encode())
-    #print((a+'\n'))
+    print('\n'+a)
     
 
 def destroyAndClose():
@@ -176,7 +196,8 @@ def adjustWaveform():
     
 def sendManualDistance(motor):
     ser.write( (motor+'M'+str(M[int(motor)-1].get())+'\n').encode() )
-    print((motor+'M'+str(M[int(motor)-1].get())+'\n'), end='')
+    #print((motor+'M'+str(M[int(motor)-1].get())+'\n'), end='')
+
 
 x = 25
 y = 75
@@ -186,7 +207,6 @@ w = 35
 
 motorFrame = [  tk.Frame(top, bg='white'), tk.Frame(top, bg='white'), tk.Frame(top, bg='white'), tk.Frame(top, bg='white')]
 W = [tk.Button(), tk.Button(), tk.Button(), tk.Button()]
-R = [tk.Button(), tk.Button(), tk.Button(), tk.Button()]
 F = [tk.Button(), tk.Button(), tk.Button(), tk.Button()]
 D = [tk.Button(), tk.Button(), tk.Button(), tk.Button()]
 M = [tk.Scale(), tk.Scale(), tk.Scale(), tk.Scale()]
@@ -202,11 +222,6 @@ W[1] = tk.Button(motorFrame[1], text='Pause/\nPlay M'+str(1+1), command=lambda: 
 W[2] = tk.Button(motorFrame[2], text='Pause/\nPlay M'+str(2+1), command=lambda: toggleState(str(2+1)+'W'))
 W[3] = tk.Button(motorFrame[3], text='Pause/\nPlay M'+str(3+1), command=lambda: toggleState(str(3+1)+'W'))
 
-R[0] = tk.Button(motorFrame[0], text="Reset M"+str(0+1), command=lambda: toggleState(str(0+1)+'R'))
-R[1] = tk.Button(motorFrame[1], text="Reset M"+str(1+1), command=lambda: toggleState(str(1+1)+'R'))
-R[2] = tk.Button(motorFrame[2], text="Reset M"+str(2+1), command=lambda: toggleState(str(2+1)+'R'))
-R[3] = tk.Button(motorFrame[3], text="Reset M"+str(3+1), command=lambda: toggleState(str(3+1)+'R'))
-
 F[0] = tk.Button(motorFrame[0], text="Set M"+str(0+1)+' Frequency', command=lambda: setFrequency(str(0+1)+'F'))
 F[1] = tk.Button(motorFrame[1], text="Set M"+str(1+1)+' Frequency', command=lambda: setFrequency(str(1+1)+'F'))
 F[2] = tk.Button(motorFrame[2], text="Set M"+str(2+1)+' Frequency', command=lambda: setFrequency(str(2+1)+'F'))
@@ -217,10 +232,10 @@ D[1] = tk.Button(motorFrame[1], text="Set M"+str(1+1)+' Distance', command=lambd
 D[2] = tk.Button(motorFrame[2], text="Set M"+str(2+1)+' Distance', command=lambda: setDistance(str(2+1)+'D'))
 D[3] = tk.Button(motorFrame[3], text="Set M"+str(3+1)+' Distance', command=lambda: setDistance(str(3+1)+'D'))
 
-C[0] = tk.Button(top, text="Move Camera\nunder Motor "+str(0+1), command=lambda: toggleState(str(0+1)+'C'))
-C[1] = tk.Button(top, text="Move Camera\nunder Motor "+str(1+1), command=lambda: toggleState(str(1+1)+'C'))
-C[2] = tk.Button(top, text="Move Camera\nunder Motor "+str(2+1), command=lambda: toggleState(str(2+1)+'C'))
-C[3] = tk.Button(top, text="Move Camera\nunder Motor "+str(3+1), command=lambda: toggleState(str(3+1)+'C'))
+C[0] = tk.Button(top, text="Move Camera\nunder Motor "+str(0+1), command=lambda: toggleState('C'+str(cameraLocations[0])))
+C[1] = tk.Button(top, text="Move Camera\nunder Motor "+str(1+1), command=lambda: toggleState('C'+str(cameraLocations[1])))
+C[2] = tk.Button(top, text="Move Camera\nunder Motor "+str(2+1), command=lambda: toggleState('C'+str(cameraLocations[2])))
+C[3] = tk.Button(top, text="Move Camera\nunder Motor "+str(3+1), command=lambda: toggleState('C'+str(cameraLocations[3])))
 
 M[0] = tk.Scale(motorFrame[0], from_=-1000, to=1000, variable=m[0], orient='vertical', length=150, command=lambda val: sendManualDistance(str(0+1)))
 M[1] = tk.Scale(motorFrame[1], from_=-1000, to=1000, variable=m[1], orient='vertical', length=150, command=lambda val: sendManualDistance(str(1+1)))
@@ -247,6 +262,8 @@ fEntry[1] = tk.Entry(motorFrame[1], textvariable=frequencies[1])
 fEntry[2] = tk.Entry(motorFrame[2], textvariable=frequencies[2])
 fEntry[3] = tk.Entry(motorFrame[3], textvariable=frequencies[3])
 
+tk.Label(top, bg='white', textvariable=cameraPosition).place(x=750, y=300, width=100)
+
 for ii in range(4):
     motorFrame[ii].place(x=10+(ii*190), y=10, width=175, height=150)
     M[ii].set(0), m[ii].set(0)
@@ -266,14 +283,13 @@ for ii in range(4):
     C[ii].place(x=20+(ii*190), y=200)
     labels[ii].place(x=100+(ii*190), y=165, width=100)
         
-RESET = tk.Button(top, text="RESET ALL MOTORS", command=lambda: toggleState('R'))
 E = tk.Button(top, text='PAUSE/UNPAUSE ALL MOTORS', command=lambda: toggleState('E'))
-Q = tk.Button(top, text='QUIT PROGRAM', command=destroyAndClose)
 X = tk.Button(top, text='EMERGENCY MOTOR RETRACT', command=lambda: toggleState('X'))
 SRISE = tk.Entry(top, textvariable=sections[0])
 SHOLD = tk.Entry(top, textvariable=sections[1])
 SFALL = tk.Entry(top, textvariable=sections[2])
 S = tk.Button(top, text='UPDATE WAVEFORM', command=adjustWaveform)
+CR = tk.Button(top, text='Reset\nCamera', command=lambda: toggleState('CR'))
 
 # Q.place(x=250, y=325)
 # RESET.place(x=250, y=275)
@@ -284,39 +300,27 @@ SRISE.place(x=200, y=250, width=35)
 SHOLD.place(x=250, y=250, width=35)
 SFALL.place(x=300, y=250, width=35)
 S.place(x=350, y=250)
+CR.place(x=700, y=200)
 update()
 # reader.start()
 # top.update_idletasks()
 
 # RESET ALL MOTORS BEFORE OPENING GUI
-toggleState('B')
-print('Resetting motors.')
-# response = ''
-# numLines = 0
-# readyFlag = False
-# while readyFlag == False:
-#     while True:
-#         try:
-#             response += ser.read().decode("utf-8")
-#         except SerialException as e:
-#             response = 'Serial input error.'
-#         if ('\n' in response):
-#                 numLines = numLines + 1
-#         if (numLines >= 1):
-#             break
-#         print(response)
-#     if response == "Ready":
-#         readyFlag = True
-
-for ii in range(4):
+# for ii in range(4):
+#     ser.write( (str(ii+1)+'M'+str(-5000)+'\n').encode() )
     
+for ii in range(4):
     toggleState(str(ii+1)+'R')
     top.after(1)
     ser.write((str(ii+1)+'D'+distances[int(ii)-1].get()+'\n').encode())
     top.after(1)
     ser.write((str(ii+1)+'F'+frequencies[int(ii)-1].get()+'\n').encode())
-    
+
+
+toggleState('B')
+
 top.mainloop()
+
 toggleState('Q')
 #toggleState('R')
 
