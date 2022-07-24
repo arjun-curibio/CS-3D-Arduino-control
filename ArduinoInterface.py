@@ -7,7 +7,7 @@ import serial.tools.list_ports
 ports = serial.tools.list_ports.comports()
 port = 'COM4'
 ser = -1
-cameraLocations = [2000, 33000, 64000, 95000]
+cameraLocations = [2000, 33000, 63000, 95000]
 comportEstablishedFlag = False
 def EstablishConnection():   
     ports = serial.tools.list_ports.comports() # get all ports available
@@ -25,7 +25,6 @@ def EstablishConnection():
     comportEstablishedFlag = False
     for port, desc, hwid in sorted(ports): # loop through each COM port
         
-        
         print('Trying '+port)
         timeoutErrorFlag = False
         try: 
@@ -35,7 +34,7 @@ def EstablishConnection():
             response = ser.readline().decode('utf-8')
             if '\n' in response:
                 inputRecieved = True
-            print(response)
+            # print(response)
             if not inputRecieved:
                 comportEstablishedFlag = False
                 print('No response. Trying another port, or exiting.')
@@ -49,9 +48,9 @@ def EstablishConnection():
                 comportEstablishedFlag = True
                 print('Connection Established ('+port+').')
                 break
-
+            
             if comportEstablishedFlag == True: # break out if flag
-                break
+                return ser
         except: 
             continue
     
@@ -67,6 +66,8 @@ def sendRecieveHandshake():
         inputRecieved = True
     print(response[:-2], end='')
     pass
+
+
 ser = EstablishConnection()
 
 # create GUI
@@ -109,6 +110,8 @@ m = [tk.StringVar(top, '0'),
 
 # update GUI based on serial input
 t_handshake = time()
+print()
+print()
 def update():
     global ser
     global t_handshake
@@ -124,7 +127,7 @@ def update():
             # print('Input recieved: ', end='')
             response = ser.readline().decode('utf-8')
             # print(str(time())+':', end='')
-            print(response, end='                                                                     \033[F')
+            # print(response, end='                                                                     \033[F')
             # print(response, end='                                                    \r')
             ser.flushInput()
         else:

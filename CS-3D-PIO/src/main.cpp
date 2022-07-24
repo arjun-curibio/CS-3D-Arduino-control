@@ -1,513 +1,529 @@
-#include <Arduino.h>
+#include "Arduino.h"
 #include "AccelStepper.h"
 #include "elapsedMillis.h"
 #include "math.h"
-float freqs[4] = {1., 1., 1., 1.};
-uint32_t period[4];
 
-uint32_t sections[5] = {0, 40, 60, 75, 100};
+// GLOBAL MOTOR DEFINITIONS
+#define MS1 11
+#define MS2 12
+#define PFD 7
+#define SLP 9
+#define RST 8
 
-// PHASES:      [B  ]      RISE      HOLD      FALL      REST
-//     ts:        0   eo_rise   eo_hold   eo_fall   eo_rest [microseconds]
-// speedPhase:    0    c_rise    c_hold    c_fall    c_rest [steps/s]
-// locationPhase: 0   eo_rise   eo_hold   eo_fall   eo_rest [steps]                        0, maxDistance, maxDistance, 0, 0
+// CAMERA STAGE DEFINITIONS
+#define STEPCAMERA 19
+#define DIRCAMERA 14
+#define SLPCAMERA 2
 
-// ts calculation: ts[current] = (sections[next] - sections[current]) * period /100        [microseconds]
+// GLOBAL MOTOR CONSTANTS
+const int MS1Val = HIGH;
+const int MS2Val = HIGH;
+const int PFDVal = LOW;
+const int RSTVal = HIGH;
 
-// speed calculation:                       (locationPhase[next] - locationPhase[current])
-//                   speedPhase[current] =  ----------------------------------------------    [steps/microseconds]
-//                                                     (ts[next] - ts[current])
-//
+// GLOBAL MOTOR VARIABLES
+int SLPVal = HIGH;
 
-// HIGH = 1
-// LOW = 0
+// MOTOR CONSTANTS
+const int STEP[4] = {23, 22, 21, 20};
+const int DIR[4]  = {18, 17, 16, 15};
+const int EN[4]   = { 6,  5,  4,  3};
 
-uint32_t ts[4][5];
-float speedPhase[4][5] = {
-  {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}, {0, 0, 0, 0, 0}
+// MOTOR VARIABLES
+float                freqs[4] = { 0.25,  0.25,  0.25,  0.25};
+uint32_t            period[4] = {   0 ,    0 ,    0 ,     0};
+long                 dists[4] = {  500,   500,   500,   500};
+int MotorStartingPositions[4] = { 1000,  1000,  1000,  1000};
+
+// MOTOR WAVEFORM VARIABLES
+uint32_t sections[5] =  {0,       40,       60,        75,      100};
+long locPhase[4][5] = {
+                        {0, dists[0], dists[0],        0,         0},
+                        {0, dists[1], dists[1],        0,         0},
+                        {0, dists[2], dists[2],        0,         0},
+                        {0, dists[3], dists[3],        0,         0}
 };
+float speedPhase[4][5] = {
+  {0,        0,        0,        0,         0},
+  {0,        0,        0,        0,         0},
+  {0,        0,        0,        0,         0},
+  {0,        0,        0,        0,         0}
+};
+uint32_t ts[4][5];
 
-boolean recievedHandshake = LOW; uint32_t tHandshake = 0;
+// MOTOR FLAGS
+boolean resetFlag[4]      = { LOW,  LOW,  LOW,  LOW};
+boolean manualOverride[4] = { LOW,  LOW,  LOW,  LOW};
+boolean firstCycle[4]     = {HIGH, HIGH, HIGH, HIGH};
+boolean enableState[4]    = { LOW,  LOW,  LOW,  LOW};
+
+// CAMERA VARIABLES
+int     CameraUnderWell     = 1;
+boolean MovingCamera        = LOW;
+int 	CameraSpeed 		      = 2000;
+int     CameraPosition      = 150;
+boolean enableStateCamera   = LOW; // LOW to disable
+boolean ResetCameraFlag     = HIGH;
+char    rowLabel[4]         = {'A', 'B', 'C', 'D'};
+
+
+// TIMING VARIABLES
 elapsedMicros timers[4];
 elapsedMicros timerSerial;
-boolean inWaiting[4] = {HIGH, HIGH, HIGH, HIGH}; // HIGH to wait
-boolean resetFlag[4] = {LOW, LOW, LOW, LOW};
-boolean manualMotor[4] = {LOW, LOW, LOW, LOW};
 
-// uint32_t waitTime[4] = {0, 0, 0, 0};
+// COMMUNICATION VARIABLES
+String SerialInput;
+String OpenMVInput;
+boolean recievedHandshake = LOW;
+char serial1buffer[2000];
+int sizeOfSerialBuffer;
 
-boolean firstCycle[4] = {HIGH, HIGH, HIGH, HIGH};
-String val;
+// OPENMV VARIABLES
+float stretchValue = 0.;
+float frequencyValue = 0.;
+float t_camera = 0.;
+float last_max_stretch = 0.;
+int passive_len[4] = {100,100,100,100};
+int mag_thresh[4][2] = {{20,40}, {20,40}, {20,40}, {20,40}};
+int post_thresh[4][2] = { {0, 15}, {0, 15}, {0, 15}, {0, 15}};
 
-boolean motorState[4] = {HIGH, HIGH, HIGH, HIGH}; boolean C_State = LOW;
-const int STEP[4] = {23, 22, 21, 20}; const int C_STEP = 19;
-const int DIR[4] = {18, 17, 16, 15}; const int C_DIR = 14;
-const int EN[4] = {6, 5, 4, 3}; const int C_SLP = 2;
-long motorDistances[4] = {200, 200, 200, 200}; int C_Position = 0;
-long locationPhase[4][5] = {
-  {0, motorDistances[0], motorDistances[0], 0, 0},
-  {0, motorDistances[1], motorDistances[1], 0, 0},
-  {0, motorDistances[2], motorDistances[2], 0, 0},
-  {0, motorDistances[3], motorDistances[3], 0, 0},
-};
 AccelStepper *stArray[4];
-AccelStepper stCamera(1, C_STEP, C_DIR);
-
-const int MS1 = 11; int MSVal1 = HIGH;
-const int MS2 = 12; int MSVal2 = HIGH;
-const int PFD = 7; int PFDVal = LOW;
-const int RST = 8; int RSTVal = HIGH;
-const int SLP = 9; int SLPVal = HIGH;
-
-int CameraLocations[4] = {8000, 39000, 79000, 102000};
-
-const int C_EN = 10; int C_ENVal = LOW;
-const int C_RST = 1; int C_RSTVal = HIGH;
+AccelStepper stCamera(1, STEPCAMERA, DIRCAMERA);
 int checkPhase(elapsedMicros t, uint32_t ts[]) {
   int inPhase = 4;
-  if (t >= ts[3]) {
-    inPhase = 4; // in REST
-  } else if ((t >= ts[2]) && (t < ts[3])) {
-    inPhase = 3; // in FALL
-  } else if ((t >= ts[1]) && (t < ts[2])) {
-    inPhase = 2; // in FALL
-  } else if ((t >= ts[0]) && (t < ts[1])) {
-    inPhase = 1; // in FALL
-  } else {
-    inPhase = 4;
-  }
+  
+  if      ( t >= ts[3]                ) { inPhase = 4; } // REST
+  else if ((t >= ts[2]) && (t < ts[3])) { inPhase = 3; } // FALL
+  else if ((t >= ts[1]) && (t < ts[2])) { inPhase = 2; } // HOLD
+  else if ((t >= ts[0]) && (t < ts[1])) { inPhase = 1; } // RISE
+  else { inPhase = 4; } // DEFAULT TO REST
   return inPhase;
 }
 
+void establishConnection() {
+
+}
+void MotorEnable(int MOTOR) { // ENABLE MOTOR
+  enableState[MOTOR] = !enableState[MOTOR];
+  if      (enableState[MOTOR] == HIGH) { resetFlag[MOTOR] = HIGH; enableState[MOTOR] = LOW;}
+  else if (enableState[MOTOR] == LOW)  { manualOverride[MOTOR] = LOW; timers[MOTOR] = 0;}
+}
+void MotorDistance(int MOTOR, float d) { // CHANGE DISTANCE OF CYCLING
+  dists[MOTOR] = d;
+  for (int ph = 1; ph < 3; ph++) { locPhase[MOTOR][ph] = dists[MOTOR]; }
+  for (int ph = 0; ph < 4; ph++) {
+    speedPhase[MOTOR][ph] = (locPhase[MOTOR][ph + 1] - locPhase[MOTOR][ph]) / ( (ts[MOTOR][ph + 1] - ts[MOTOR][ph]) / 1e6 );
+    if (isnan(speedPhase[MOTOR][ph])) {
+      speedPhase[MOTOR][ph] = 0;
+    }
+  }
+}
+void MotorFrequency(int MOTOR, float f) { // CHANGE FREQUENCY OF CYCLING
+  freqs[MOTOR] = f;
+  period[MOTOR] = 1e6 / f;
+  Serial.println(period[MOTOR]);
+  for (int ph = 0; ph < 5; ph++) {
+    if   (ph == 4)  { ts[MOTOR][ph] = period[MOTOR]; }
+    else            { ts[MOTOR][ph] = sections[ph] * period[MOTOR] / 100; }
+  }
+
+  for (int ph = 0; ph < 4; ph++) {
+    speedPhase[MOTOR][ph] = (locPhase[MOTOR][ph + 1] - locPhase[MOTOR][ph]) / ( (ts[MOTOR][ph + 1] - ts[MOTOR][ph]) / 1e6 );
+    if (isnan(speedPhase[MOTOR][ph])) {
+      speedPhase[MOTOR][ph] = 0;
+    }
+  }
+}
+void MotorManual(int MOTOR, float m) { // MANUAL OVERRIDE OF MOTOR POSITION
+  manualOverride[MOTOR] = HIGH;
+  enableState[MOTOR] = LOW;
+  stArray[MOTOR]->moveTo(m);
+  stArray[MOTOR]->setMaxSpeed(1000);
+  if (stArray[MOTOR]->distanceToGo() == 0) {
+    enableState[MOTOR] = HIGH;
+  }
+  
+}
+void MotorResetPosition(int MOTOR) { // RESET MOTOR POSITION
+  stArray[MOTOR]->setCurrentPosition(0);
+  enableState[MOTOR] = HIGH;
+}
+void WaveformUpdate(uint32_t RIS, uint32_t HOL, uint32_t FAL) { // CHANGE WAVEFORM SHAPE
+  if ( (RIS >= 0) && (HOL > RIS) && (FAL >= HOL) && FAL <= 100 ) {
+    sections[1] = RIS; sections[2] = HOL; sections[3] = FAL;
+  }
+
+  for (int MOTOR = 0; MOTOR < 4; MOTOR++) {
+    enableState[MOTOR] = LOW;
+    resetFlag[MOTOR] = HIGH;
+    timers[MOTOR] = 0;
+    for (int ph = 0; ph < 5; ph++) {
+      if   (ph == 4)  { ts[MOTOR][ph] = period[MOTOR]; }
+      else            { ts[MOTOR][ph] = sections[ph] * period[MOTOR] / 100; }
+    }
+    for (int ph = 0; ph < 4; ph++) {
+      speedPhase[MOTOR][ph] = (locPhase[MOTOR][ph + 1] - locPhase[MOTOR][ph]) / ( (ts[MOTOR][ph + 1] - ts[MOTOR][ph]) / 1e6 );
+      if (isnan(speedPhase[MOTOR][ph])) {
+        speedPhase[MOTOR][ph] = 0;
+    }
+  }
+  }
+}
+void MotorAdjust(int MOTOR, int ADJ) { // ADJUST POSITION OF MOTOR
+  enableState[MOTOR] = LOW;
+  manualOverride[MOTOR] = HIGH;
+  int cp = stArray[MOTOR]->currentPosition();
+  switch (ADJ) {
+    case 0: 
+      stArray[MOTOR]->moveTo(cp - 10);
+      stArray[MOTOR]->setMaxSpeed(5000);
+      break;
+    case 1:
+      stArray[MOTOR]->moveTo(cp + 10);
+      stArray[MOTOR]->setMaxSpeed(5000);
+      break; 
+  }
+}
+void MotorRetract(int MOTOR) { // RETRACT MOTOR POSITION TO ZERO
+  manualOverride[MOTOR] = HIGH;
+  enableState[MOTOR] = LOW;
+  stArray[MOTOR]->setMaxSpeed(2000);
+  stArray[MOTOR]->moveTo(-7000);
+}
+void CameraMove(int CameraPosition) {
+//  enableStateCamera = HIGH;
+//  ResetCameraFlag = LOW;
+//  digitalWrite(SLPCAMERA, enableStateCamera);
+  stCamera.moveTo(CameraPosition); 
+}
+void CameraReset() {
+  Serial.print("RESET IN");
+  ResetCameraFlag = HIGH;
+//  enableStateCamera = HIGH;
+//  digitalWrite(SLPCAMERA, enableStateCamera);
+  CameraMove(-10000);
+//  stCamera.setMaxSpeed(100000);
+}
+void StartingPositions(int MOTOR, int action) {
+  switch (action) {
+    case 0: // set starting position
+      MotorStartingPositions[MOTOR] = stArray[MOTOR]->currentPosition();
+      break;
+    case 1: // go to starting position
+      enableState[MOTOR] = LOW;
+      manualOverride[MOTOR] = HIGH;
+      stArray[MOTOR]->moveTo(MotorStartingPositions[MOTOR]);
+      break;
+    
+  }
+      
+}
+void CameraAdjust(int CameraWell, int CameraPosition) {
+  
+}
+void(* resetFunc) (void) = 0; //declare reset function @ address 0
 
 void setup() {
-  pinMode(C_RST, OUTPUT); digitalWrite(C_RST, C_RSTVal);
-  // pinMode(13, OUTPUT); digitalWrite(13, LOW);
-  pinMode(C_EN, OUTPUT); digitalWrite(C_EN, C_ENVal);
+  // put your setup code here, to run once:
 
-  Serial.begin(9600); Serial.setTimeout(0);
-
+  // GLOBAL MOTOR VARIABLE SET-UP
+  pinMode(MS1, OUTPUT); digitalWrite(MS1, MS1Val);
+  pinMode(MS2, OUTPUT); digitalWrite(MS2, MS2Val);
+  pinMode(RST, OUTPUT); digitalWrite(RST, RSTVal);
+  pinMode(SLP, OUTPUT); digitalWrite(SLP, SLPVal);
+  pinMode(PFD, OUTPUT); digitalWrite(PFD, PFDVal);
+  pinMode(10, OUTPUT);  digitalWrite(10, LOW);
+  // MOTOR VARIABLE SET-UP
   for (int st = 0; st < 4; st++) {
+    pinMode(EN[st], OUTPUT); digitalWrite(EN[st], enableState[st]);
+
     stArray[st] = new AccelStepper(1, STEP[st], DIR[st]);
     stArray[st]->setMaxSpeed(10000);
     stArray[st]->setAcceleration(100000);
 
-    pinMode(EN[st], OUTPUT); digitalWrite(EN[st], motorState[st]);
-
-    for (int ii = 1; ii < 3; ii++) {
-      locationPhase[st][ii] = motorDistances[st];
-    }
-
     period[st] = 1e6 / freqs[st];
-    for (int ii = 0; ii < 4; ii++) {
-      ts[st][ii] = sections[ii] * period[st] / 100; // microseconds for each phase change
+    for (int ph = 0; ph < 5; ph++) {
+      if (ph == 1 || ph == 2) {
+        ts[st][ph] = sections[ph] * period[st] / 100;
+        locPhase[st][ph] = dists[st];
+      }
+      if (ph == 3) {
+        ts[st][ph] = sections[ph] * period[st] / 100;
+      }
+      if (ph == 4) {
+        ts[st][ph] = period[st];
+      }
     }
-    ts[st][4] = period[st];
-    speedPhase[st][0] = (locationPhase[st][1] - locationPhase[st][0]) / ((ts[st][1] - ts[st][0]) / 1e6); // RISE
-    speedPhase[st][1] = (locationPhase[st][2] - locationPhase[st][1]) / ((ts[st][2] - ts[st][1]) / 1e6); // HOLD
-    speedPhase[st][2] = (locationPhase[st][3] - locationPhase[st][2]) / ((ts[st][3] - ts[st][2]) / 1e6); // FALL
-    speedPhase[st][3] = (locationPhase[st][4] - locationPhase[st][3]) / ((ts[st][4] - ts[st][3]) / 1e6); // RELAX
-
-    if (isnan(speedPhase[st][1])) {
-      speedPhase[st][1] = 0;
+    for (int ph = 0; ph < 4; ph++) {
+      speedPhase[st][ph] = (locPhase[st][ph + 1] - locPhase[st][ph]) / ( (ts[st][ph + 1] - ts[st][ph]) / 1e6 );
+      if (isnan(speedPhase[st][ph])) {
+        speedPhase[st][ph] = 0;
+      }
     }
 
-
+    
+    
   }
 
-  stCamera.setMaxSpeed(8000);
-  stCamera.setAcceleration(100000);
+  // CAMERA STAGE VARIABLE SET-UP
+  stCamera.setMaxSpeed(CameraSpeed);
+  stCamera.setAcceleration(CameraSpeed);
   stCamera.setCurrentPosition(0);
-  pinMode(MS1, OUTPUT); digitalWrite(MS1, MSVal1);
-  pinMode(MS2, OUTPUT); digitalWrite(MS2, MSVal2);
-  pinMode(RST, OUTPUT); digitalWrite(RST, !RSTVal);
-  pinMode(PFD, OUTPUT); digitalWrite(PFD, PFDVal);
-  pinMode(SLP, OUTPUT); digitalWrite(SLP, !SLPVal);
+  ResetCameraFlag = LOW;
+  pinMode(SLPCAMERA, OUTPUT); digitalWrite(SLPCAMERA, enableStateCamera);
 
-  pinMode(C_SLP, OUTPUT); digitalWrite(C_SLP, C_State);
+  // COMMUNICATION SET-UP
+  Serial.begin(9600);
+  Serial.setTimeout(0);
+  
+  Serial1.begin(9600); // RX: 0, TX: 1
+  // Serial1.setTimeout(0);
+  sizeOfSerialBuffer = sizeof(serial1buffer);
+  Serial1.addMemoryForRead(serial1buffer, sizeOfSerialBuffer);
 
+  establishConnection();
+
+  // MOTOR INITIALIZATION
+  for (int st = 0; st < 4; st++) {
+    MotorRetract(st);
+  }
+
+  int allDistanceToGo = 0;
+  for (int st = 0; st < 4; st++ ) {
+    allDistanceToGo += stArray[st]->distanceToGo();
+  }
+  while (allDistanceToGo != 0) {
+    allDistanceToGo = 0;
+    for (int st = 0; st < 4; st++ ) {
+      allDistanceToGo += stArray[st]->distanceToGo();
+      stArray[st]->run();
+    }
+  }
+
+  for (int st = 0; st < 4; st++) {
+    stArray[st]->setCurrentPosition(0);
+    MotorManual(st, MotorStartingPositions[st]);
+  }
+
+  allDistanceToGo = 0;
+  for (int st = 0; st < 4; st++ ) {
+    allDistanceToGo += stArray[st]->distanceToGo();
+  }
+  while (allDistanceToGo != 0) {
+    allDistanceToGo = 0;
+    for (int st = 0; st < 4; st++ ) {
+      allDistanceToGo += stArray[st]->distanceToGo();
+      stArray[st]->run();
+    }
+  }
+  for (int st = 0; st < 4; st++) {
+	stArray[st]->setCurrentPosition(0);
+	enableState[st] = HIGH;
+	manualOverride[st] = LOW;
+	resetFlag[st] = HIGH;
+  }
 }
 
 void loop() {
-  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  // SERIAL COMMANDS FROM PYTHON4
-  // TAKEN COMMAND letters:
-  //        W: enable/disable
-  //        R: reset
-  //        F: frequency change
-  //        D: distance change
-  //        A: adjust motor position
-  //        S: waveform change
-  //        C: camera movement
-  //        X: Emergency motor retract
-  //        
-
-  ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  // COMMUNICATION UPDATE
   if (Serial.available() > 0) {
-    val = Serial.readString();
-    //Serial.println(val);
-    //Serial.println(val);
-    if (val.equals("Python Connection Established!\n")) { // establish connection
-      //Serial.flush();
-      Serial.print("Arduino Connection Established!\n");
-      //Serial.flush();
-      for (int st = 0; st < 4; st++) {
-        motorState[st] = HIGH;
-        inWaiting[st] = HIGH;
-        resetFlag[st] = LOW;
-        // waitTime[st] = 0;
-        digitalWrite(EN[st], motorState[st]);
-      }
-      recievedHandshake = HIGH;
-      tHandshake = millis();
+    SerialInput = Serial.readString();
+    // Serial.println(SerialInput.substring(0, SerialInput.length() - 1));
+    Serial.flush();
+
+    if (SerialInput.substring(0, 1) == "M") { // enable/disable Motor
+      int st = SerialInput.substring(1, 2).toInt() - 1;
+      MotorEnable(st);
     }
-
-    if (val.equals("Python handshake.\n")) {
-      Serial.print("Arduino handshake.\n");
-      //Serial.flush();
-      recievedHandshake = HIGH;
-      tHandshake = millis();
+    else if (SerialInput.substring(0, 1) == "D") { // change motor Distance
+      int st = SerialInput.substring(1, 2).toInt() - 1;
+      float d = SerialInput.substring(3, SerialInput.length() - 1).toFloat();
+      MotorDistance(st, d);
     }
-    if (val.substring(0, 1) == "C") {
-      C_State = HIGH; digitalWrite(C_SLP, C_State);
-      Serial.print(val.substring(1, val.length()-1));
-      Serial.print(',');
-      if (val.substring(1, val.length() - 1) == "R") {
-        
-        stCamera.setSpeed(30000);
-        stCamera.setAcceleration(1000000);
-
-        stCamera.moveTo(-100000); // move camera to starting point
-        while (stCamera.distanceToGo() != 0) { stCamera.run();}
-
-        stCamera.setCurrentPosition(0); // reset as 0 point
-        // stCamera.moveTo(CameraLocations[0]); // move to under the first motor
-
-        // while (stCamera.distanceToGo() != 0) { stCamera.run();}
-
-      }
-      else {
-        
-        int newCameraLocation = val.substring(1, val.length() - 1).toInt();
-        Serial.println(newCameraLocation);
-        C_State = HIGH; // enable camera motor
-        digitalWrite(C_SLP, C_State);
-        stCamera.moveTo(newCameraLocation);
-      }
+    else if (SerialInput.substring(0, 1) == "F") { // change motor Frequency
+      int st = SerialInput.substring(1, 2).toInt() - 1;
+      float f = SerialInput.substring(3, SerialInput.length() - 1).toFloat();
+      MotorFrequency(st, f);
     }
-    if (val.substring(0, 1) == "X") {
-      for (int st = 0; st < 4; st++) { // enable all motors
-        motorState[st] = LOW;
-        inWaiting[st] = LOW;
-        resetFlag[st] = LOW;
-        // waitTime[st] = timers[st];
-        digitalWrite(EN[st], motorState[st]);
-
-        stArray[st]->setMaxSpeed(10000); // quickly retract
-        stArray[st]->moveTo(-7000); // retract arbitrarily high amount
-
-      }
-      int sumDistancesToGo = 0;
-      for (int st = 0; st < 4; st++) {
-        sumDistancesToGo += stArray[st]->distanceToGo();
-      }
-
-      while (sumDistancesToGo != 0) { // retract all motors
-        sumDistancesToGo = 0;
-        for (int st = 0; st < 4; st++) {
-          sumDistancesToGo += stArray[st]->distanceToGo();
-          stArray[st]->run();
-        }
-      }
-
-      for (int st = 0; st < 4; st++) { // enable all motors
-        motorState[st] = HIGH;
-        inWaiting[st] = HIGH;
-        resetFlag[st] = LOW;
-        // waitTime[st] = timers[st];
-        digitalWrite(EN[st], motorState[st]);
-        stArray[st]->setCurrentPosition(0);
-      }
+    else if (SerialInput.substring(0, 1) == "O") { // position Override
+      int st = SerialInput.substring(1, 2).toInt() - 1;
+      int m = SerialInput.substring(3, SerialInput.length() - 1).toInt();
+      MotorManual(st, m);
     }
-    
-    if (val.substring(0, 1) == "B") { // boot up program
+    else if (SerialInput.substring(0, 1) == "R") { // Reset
+      int st = SerialInput.substring(1,2).toInt() - 1;
+      MotorResetPosition(st);
+    }
+    else if (SerialInput.substring(0, 1) == "S") { // waveform Shape
+      uint32_t RIS = SerialInput.substring(1,3).toInt();
+      uint32_t HOL = SerialInput.substring(4,6).toInt();
+      uint32_t FAL = SerialInput.substring(7,SerialInput.length() - 1).toInt();
+      WaveformUpdate(RIS, HOL, FAL);
+    }
+    else if (SerialInput.substring(0, 1) == "A") { // motor Adjustment
+      int st = SerialInput.substring(1, 2).toInt() - 1;
+      int ADJ = SerialInput.substring(3, SerialInput.length() - 1).toInt();
+      MotorAdjust(st, ADJ);
+    }
+    else if (SerialInput.substring(0, 1) == "C") { // Camera move
+      CameraUnderWell = SerialInput.substring(1,2).toInt();
+      CameraPosition = SerialInput.substring(3,SerialInput.length()-1).toInt();
+      CameraMove(CameraPosition);
+    }
+    else if (SerialInput.substring(0, 1) == "V") { // camera reset
+      CameraReset();
+//      Serial.println("RESET");
+    }
+    else if (SerialInput.substring(0, 1) == "X") { // emergency retract
+      int st = SerialInput.substring(1, SerialInput.length() - 1).toInt() - 1;
+      MotorRetract(st);
+    }
+    else if (SerialInput.substring(0, 1) == "P") { // starting Positioning
+      int st = SerialInput.substring(1, 3).toInt() - 1;
+      int action = SerialInput.substring(4, SerialInput.length() - 1).toInt();
+      StartingPositions(st, action);
+    }
+  }
 
-      for (int st = 0; st < 4; st++) {
-        motorState[st] = HIGH;
-        inWaiting[st] = HIGH;
-        resetFlag[st] = LOW;
-        // waitTime[st] = 0;
-        digitalWrite(EN[st], HIGH);
-        stArray[st]->setCurrentPosition(0);
-      }
-      digitalWrite(RST, RSTVal);
-      digitalWrite(SLP, SLPVal);
-      digitalWrite(C_SLP, HIGH);
-      Serial.println("Ready");
-    } if (val.substring(0, 1) == "Q") { // quit program
-      for (int st = 0; st < 4; st++) {
-        motorState[st] = HIGH;
-        inWaiting[st] = HIGH;
-        resetFlag[st] = LOW;
-        // waitTime[st] = 0;
-        digitalWrite(EN[st], LOW);
-      }
-      digitalWrite(RST, !RSTVal);
-      digitalWrite(SLP, !SLPVal);
-    } else if (val.substring(0, 1) == "R") {
-      for (int st = 0; st < 4; st++) {
-        motorState[st] = LOW;
-        inWaiting[st] = HIGH;
-        resetFlag[st] = HIGH;
-        // waitTime[st] = 0;
-        digitalWrite(EN[st], LOW);
-      }
-    } else if (val.substring(0, 1) == "E") {
-      for (int st = 0; st < 4; st++) {
-        motorState[st] = !motorState[st];
-        inWaiting[st] = LOW;
-        resetFlag[st] = LOW;
-        // waitTime[st] = timers[st];
-        digitalWrite(EN[st], motorState[st]);
-      }
-
-    } else if (val.substring(0, 1) == "S") {
-      uint32_t num1 = val.substring(2, 4).toInt();
-      uint32_t num2 = val.substring(5, 7).toInt();
-      uint32_t num3 = val.substring(8, 10).toInt();
-      
-      if ((num2 > num1) && (num3 >= num2) && (num3 <= 100)) {
-        // Serial.println("CHANGED");
-        sections[1] = num1;
-        sections[2] = num2;
-        sections[3] = num3;
-      }
-
-      //sections[num1] = uint32_t(val.substring(2, val.length() - 1).toFloat());
-      for (int st = 0; st < 4; st++) {
-        motorState[st] = LOW;
-        inWaiting[st] = HIGH;
-        resetFlag[st] = HIGH;
-        // waitTime[st] = 0;
-        digitalWrite(EN[st], LOW);
-        for (int ii = 0; ii < 4; ii++) {
-          ts[st][ii] = sections[ii] * period[st] / 100; // microseconds for each phase change
-        }
-        ts[st][4] = period[st];
-        speedPhase[st][0] = (locationPhase[st][1] - locationPhase[st][0]) / ((ts[st][1] - ts[st][0]) / 1e6); // RISE
-        speedPhase[st][1] = (locationPhase[st][2] - locationPhase[st][1]) / ((ts[st][2] - ts[st][1]) / 1e6); // HOLD
-        speedPhase[st][2] = (locationPhase[st][3] - locationPhase[st][2]) / ((ts[st][3] - ts[st][2]) / 1e6); // FALL
-        speedPhase[st][3] = (locationPhase[st][4] - locationPhase[st][3]) / ((ts[st][4] - ts[st][3]) / 1e6); // RELAX
-        if (isnan(speedPhase[st][1])) {
-          speedPhase[st][1] = 0;
-        }
-      }
+if (Serial1.available() > 0) {
+    //    val = Serial1.read
+    // int valueCount = 0;
+    // String values[20];
+    OpenMVInput = Serial1.readStringUntil('\n');
+    Serial1.flush();
+    Serial.println(OpenMVInput);
+    // Serial.println(OpenMVInput);
+    // while (OpenMVInput.length() > 0) {
+    //   int index = OpenMVInput.indexOf('&');
+    //   if (index == -1) { // at end of string
+    //     values[valueCount++] = OpenMVInput;
+    //     break;
+    //   }
+    //   else {
+    //     values[valueCount++] = OpenMVInput.substring(0, index);
+    //     OpenMVInput = OpenMVInput.substring(index+1);
+    //   }
+    // }
+  }
+  // if (Serial1.available() > 0) {
+  //   int valueCount = 0;
+  //   float values[20];
+  //   OpenMVInput = Serial1.readString();
+  //   Serial1.flush();
+  //   while (OpenMVInput.length() > 0) {
+  //     int index = OpenMVInput.indexOf('&');
+  //     if (index == -1) {
+  //       values[valueCount++] = OpenMVInput.toFloat();
+  //       break;
+  //     }
+  //     else {
+  //       values[valueCount++] = OpenMVInput.substring(0, index).toFloat();
+  //       OpenMVInput = OpenMVInput.substring(index+1);
+  //     }
+  //   }
+  //   t_camera = values[0];
+  //   stretchValue = values[1];
+  //   frequencyValue = values[2];
+  //   float last_max_stretch = values[3];
+  // }
+  // MOTOR UPDATE
+  for (int st = 0; st < 4; st++) {
+    if (timers[st] > period[st])  {
+      timers[st] = 0;    // RESET TIMER IF PAST PERIOD LENGTH
+    }
+    if (firstCycle[st])           {
+      timers[st] = 0;  // RESET TIMER IF FIRST CYCLE, SWITCH TO SECOND CYCLE
+      firstCycle[st] = LOW;
+    }
+    if (enableState[st] == HIGH)  {
+      timers[st] = 0;  // HOLD AT BEGINNING OF CYCLE IF LOW
     }
 
 
-
-    if (val.substring(0, 1).toInt() > 0) { // individual motor control
-      int st = val.substring(0, 1).toInt();
-      st = st - 1;
-      
-      if (val.substring(1, 2) == "S") { // reset motor position to 0
-        if (motorState[st] == HIGH) {
-          stArray[st]->setCurrentPosition(0);
-        }
-      }
-      if (val.substring(1, 2) == "M") { // manual motor control
-        // waitTime[st] = 0;
-        inWaiting[st] = HIGH;
-        motorState[st] = LOW;
-        manualMotor[st] = HIGH;
-        digitalWrite(EN[st], motorState[st]);
-
-
-        int newMotorPosition = val.substring(2, val.length() - 1).toInt();
-        // Serial.println(val.substring(2, val.length() - 1));
-
-        stArray[st]->moveTo(newMotorPosition);
-        stArray[st]->setMaxSpeed(1000);
-
-
-      }
-      if (val.substring(1, 2) == "W") { // toggle motor state
-        if (motorState[st] == LOW) { // if already on, turn off and reset
-          motorState[st] = LOW;
-          inWaiting[st] = HIGH;
-          resetFlag[st] = HIGH;
-          // waitTime[st] = 0;
-          // motorState will go HIGH in reset loop
-        } else { // if already off, turn on
-          motorState[st] = LOW;
-          inWaiting[st] = LOW;
-          // waitTime[st] = 0;
-          timers[st] = 0;
-        }
-        digitalWrite(EN[st], motorState[st]);
-        if (manualMotor[st] == HIGH) { // if was recently in manual state, reset
-          stArray[st]->setCurrentPosition(0);
-          inWaiting[st] = LOW;
-          motorState[st] = LOW;
-          // waitTime[st] = 0;
-          manualMotor[st] = LOW;
-
-          Serial.print("RESET:");
-          Serial.println(st);
-        }
-
-
-      } else if (val.substring(1, 2) == "R") { // reset motor
-
-        motorState[st] = LOW;
-        manualMotor[st] = LOW;
-        inWaiting[st] = HIGH;
-        resetFlag[st] = HIGH;
-        // waitTime[st] = 0;
-        digitalWrite(EN[st], LOW);
-
-      } else if (val.substring(1, 2) == "F") {
-        float newFreq = val.substring(2, val.length() - 1).toFloat();
-        // Serial.println(val.substring(2, val.length() - 1));
-
-        freqs[st] = newFreq;
-        period[st] = 1e6 / freqs[st];
-        for (int ii = 0; ii < 4; ii++) {
-          ts[st][ii] = sections[ii] * period[st] / 100; // microseconds for each phase change
-        }
-        ts[st][4] = period[st];
-        speedPhase[st][0] = (locationPhase[st][1] - locationPhase[st][0]) / ((ts[st][1] - ts[st][0]) / 1e6); // RISE
-        speedPhase[st][1] = (locationPhase[st][2] - locationPhase[st][1]) / ((ts[st][2] - ts[st][1]) / 1e6); // HOLD
-        speedPhase[st][2] = (locationPhase[st][3] - locationPhase[st][2]) / ((ts[st][3] - ts[st][2]) / 1e6); // FALL
-        speedPhase[st][3] = (locationPhase[st][4] - locationPhase[st][3]) / ((ts[st][4] - ts[st][3]) / 1e6); // RELAX
-
-      } else if (val.substring(1, 2) == "D") { // new motor distance
-        float newDistance = val.substring(2, val.length() - 1).toFloat();
-        // Serial.println(val.substring(2, val.length() - 1));
-
-        motorDistances[st] = newDistance;
-        for (int ii = 1; ii < 3; ii++) {
-          locationPhase[st][ii] = motorDistances[st];
-        }
-        speedPhase[st][0] = (locationPhase[st][1] - locationPhase[st][0]) / ((ts[st][1] - ts[st][0]) / 1e6); // RISE
-        speedPhase[st][1] = (locationPhase[st][2] - locationPhase[st][1]) / ((ts[st][2] - ts[st][1]) / 1e6); // HOLD
-        speedPhase[st][2] = (locationPhase[st][3] - locationPhase[st][2]) / ((ts[st][3] - ts[st][2]) / 1e6); // FALL
-        speedPhase[st][3] = (locationPhase[st][4] - locationPhase[st][3]) / ((ts[st][4] - ts[st][3]) / 1e6); // RELAX
-
-      } else if (val.substring(1, 2) == "A") {
-        Serial.println(val);
-        digitalWrite(EN[st], LOW);
-        digitalWrite(MS1, MSVal1); digitalWrite(MS2, MSVal2);
-        if ((inWaiting[st] == HIGH) && (stArray[st]->currentPosition() == 0)) { // only move when in waiting
-          int adjustValue = val.substring(2, val.length() - 1).toFloat();
-          Serial.println(adjustValue);
-          switch (adjustValue) {
-            case 0:
-              stArray[st]->setCurrentPosition(10);
-              break;
-            case 1:
-              stArray[st]->setCurrentPosition(-10);
-              break;
-            default:
-              break;
-          }
-
-          stArray[st]->moveTo(0);
-          stArray[st]->setMaxSpeed(1000);
-          stArray[st]->runToPosition();
-        }
-        digitalWrite(EN[st], motorState[st]);
-        digitalWrite(MS1, LOW); digitalWrite(MS2, LOW);
-      }
-
-    }
-  }  // END SERIAL COMMANDS
-  
-  // LOOP THROUGH EACH STEPPER MOTOR
-  for (int st = 0; st < 4; st++) { // loop through each stepper motor    
-    if (timers[st] > period[st]) { timers[st] = 0; }
-
-    if (firstCycle[st]) { // if this is the first cycle, need to set t_start to current time
-      timers[st] = 0;
-      firstCycle[st] = LOW; // set firstCycle tag to LOW
-    }
-
-    int inPhase = 4; // re-initialize phase tracker
+    int inPhase = 4;
     inPhase = checkPhase(timers[st], ts[st]);
-    if (motorState[st] == LOW) {
+
+    if (enableState[st] == LOW) {
       if (resetFlag[st] == HIGH) {
         stArray[st]->setMaxSpeed(2000);
         stArray[st]->moveTo(0);
         stArray[st]->run();
         if (stArray[st]->distanceToGo() == 0) {
-          motorState[st] = HIGH; // disable motor
-          inWaiting[st] = HIGH; // raise waiting flag
-          resetFlag[st] = LOW;    // set reset flag back to 0
-          timers[st] = 0; // reset timer
-          digitalWrite(EN[st], motorState[st]);
+          enableState[st] = HIGH;
+          resetFlag[st] = LOW;
+          timers[st] = 0;
         }
       }
-      else if (manualMotor[st] == LOW) {
+      else if (manualOverride[st] == LOW) {
         stArray[st]->setMaxSpeed(abs(speedPhase[st][inPhase - 1]));
-        stArray[st]->moveTo(locationPhase[st][inPhase]);
+        stArray[st]->moveTo(locPhase[st][inPhase]);
         stArray[st]->run();
       }
       else {
-        stArray[st]->run();
-
+        stArray[st] -> run();
+		if (stArray[st]->distanceToGo() == 0) {
+			manualOverride[st] = LOW;
+			enableState[st] = HIGH;
+		}
+        
       }
     }
 
-    //Serial.println(' ');
   }
 
-  if (C_State == HIGH) {
-    digitalWrite(C_SLP, C_State);
+  // CAMERA UPDATE
+  if (stCamera.distanceToGo() != 0) {
+    enableStateCamera = HIGH; digitalWrite(SLPCAMERA, enableStateCamera);
+    MovingCamera = HIGH;
     stCamera.run();
-    if (stCamera.distanceToGo() == 0) {
-      C_State = LOW;
-      digitalWrite(C_SLP, C_State);
-    }
   }
-
-
-  if (timerSerial > 10 * 1000) {
-
-    // for (int st = 0; st < 4; st++) {
-    //   Serial.print(motorState[st]);
-    //   Serial.print(',');
-    //   Serial.print(inWaiting[st]);
-    //   Serial.print(',');
-    //   Serial.print(manualMotor[st]);
-    //   Serial.print(',');
-    //   Serial.print(resetFlag[st]);
-    //   Serial.print(';');
-    // }
-    Serial.print("POSITIONS:");
-    for (int st = 0; st < 4; st++) {
-      
-      Serial.print(timers[st]*100/period[st]);
-      Serial.print(',');
-      Serial.print(stArray[st]->currentPosition());
-      Serial.print(";");
+  else {
+    MovingCamera = LOW;
+    if (ResetCameraFlag == HIGH) {
+      ResetCameraFlag = LOW;
+      stCamera.setCurrentPosition(0);
+      CameraMove(CameraPosition);
     }
-    // Serial.print(digitalRead(C_EN));
-    // Serial.print(',');
-    // Serial.print(digitalRead(C_RST));
-    // Serial.print(',');
-    // Serial.print(digitalRead(C_SLP));
-    // Serial.print(',');
-    Serial.println(stCamera.currentPosition());
+    enableStateCamera = LOW; digitalWrite(SLPCAMERA, enableStateCamera);
+  }
+  
+
+
+
+  
+  // TIMER UPDATE
+  if (timerSerial > 33 * 1000) {
     
-    // Serial.println(' ');
+    Serial.print(stretchValue);
+    Serial.print(',');
+    Serial.flush();
+    for (int st = 0; st < 4; st++) {
+      //      Serial.print(timers[st]*100/period[st]);
+      //      Serial.print(',');
+      Serial.print(st+1);
+      Serial.print('&');
+	  Serial.print(timers[st]/1000);
+	  Serial.print('&');
+      Serial.print(stArray[st]->currentPosition());
+	  Serial.print('&');
+      Serial.print(dists[st]);
+	  Serial.print('&');
+      Serial.print(freqs[st]);
+	  Serial.print('&');
+      Serial.print(enableState[st]);
+	  Serial.print('&');
+      Serial.print(manualOverride[st]);
+      Serial.print(',');
+//            Serial.print(enableState[st]);
+    }
+    if   (MovingCamera == HIGH) { Serial.print(-1); digitalWrite(10, HIGH);}
+    else                        { Serial.print(rowLabel[CameraUnderWell-1]);  digitalWrite(10, LOW);}
+    Serial.print('&');
+    Serial.print(digitalRead(10));
+    Serial.print('&');
+    Serial.print(stCamera.currentPosition());
+    
+    Serial.println(' ');
     timerSerial = 0;
   }
-
-  // if (millis() > tHandshake + 10*1000) {
-  //   for (int st = 0; st < 4; st++) {
-  //     motorState[st] = HIGH; digitalWrite(EN[st], motorState[st]);
-  //     C_State = LOW; digitalWrite(C_EN, C_State);
-
-  //   }
-  // }
 }
