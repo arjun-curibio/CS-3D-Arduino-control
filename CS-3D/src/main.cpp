@@ -134,7 +134,7 @@ void MotorFrequency(int MOTOR, float f) { // CHANGE FREQUENCY OF CYCLING
     }
   }
 }
-void MotorManual(int MOTOR, float m) { // MANUAL OVERRIDE OF MOTOR POSITION
+void MotorManual(int MOTOR, int m) { // MANUAL OVERRIDE OF MOTOR POSITION
   manualOverride[MOTOR] = HIGH;
   enableState[MOTOR] = LOW;
   stArray[MOTOR]->moveTo(m);
@@ -175,19 +175,19 @@ void MotorAdjust(int MOTOR, int ADJ) { // ADJUST POSITION OF MOTOR
   int cp = stArray[MOTOR]->currentPosition();
   switch (ADJ) {
     case 0: 
-      stArray[MOTOR]->moveTo(cp - 10);
-      stArray[MOTOR]->setMaxSpeed(5000);
+      stArray[MOTOR]->moveTo(cp - 4);
+      stArray[MOTOR]->setMaxSpeed(1000);
       break;
     case 1:
-      stArray[MOTOR]->moveTo(cp + 10);
-      stArray[MOTOR]->setMaxSpeed(5000);
+      stArray[MOTOR]->moveTo(cp + 4);
+      stArray[MOTOR]->setMaxSpeed(1000);
       break; 
   }
 }
 void MotorRetract(int MOTOR) { // RETRACT MOTOR POSITION TO ZERO
   manualOverride[MOTOR] = HIGH;
   enableState[MOTOR] = LOW;
-  stArray[MOTOR]->setMaxSpeed(2000);
+  stArray[MOTOR]->setMaxSpeed(1000);
   stArray[MOTOR]->moveTo(-7000);
 }
 void CameraMove(int CameraPosition) {
@@ -445,7 +445,7 @@ if (Serial1.available() > 0) {
 
     if (enableState[st] == LOW) {
       if (resetFlag[st] == HIGH) {
-        stArray[st]->setMaxSpeed(2000);
+        stArray[st]->setMaxSpeed(1000);
         stArray[st]->moveTo(0);
         stArray[st]->run();
         if (stArray[st]->distanceToGo() == 0) {
@@ -461,6 +461,10 @@ if (Serial1.available() > 0) {
       }
       else {
         stArray[st] -> run();
+        if (stArray[st]->currentPosition() == -7000) {
+          MotorResetPosition(st);
+          MotorManual(st, 500);
+        }
 		if (stArray[st]->distanceToGo() == 0) {
 			manualOverride[st] = LOW;
 			enableState[st] = HIGH;
@@ -493,7 +497,10 @@ if (Serial1.available() > 0) {
   
   // TIMER UPDATE
   if (timerSerial > 33 * 1000) {
+
     Serial.flush();
+    Serial.print("-33");
+    Serial.print(',');
     Serial.print(millis());
     Serial.print(',');
     
@@ -502,16 +509,16 @@ if (Serial1.available() > 0) {
       //      Serial.print(',');
       Serial.print(st+1);
       Serial.print('&');
-	  Serial.print(timers[st]/1000);
-	  Serial.print('&');
+      Serial.print(timers[st]/1000);
+      Serial.print('&');
       Serial.print(stArray[st]->currentPosition());
-	  Serial.print('&');
+      Serial.print('&');
       Serial.print(dists[st]);
-	  Serial.print('&');
+      Serial.print('&');
       Serial.print(freqs[st]);
-	  Serial.print('&');
+      Serial.print('&');
       Serial.print(enableState[st]);
-	  Serial.print('&');
+      Serial.print('&');
       Serial.print(manualOverride[st]);
       Serial.print(',');
 //            Serial.print(enableState[st]);
