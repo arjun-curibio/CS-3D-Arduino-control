@@ -493,10 +493,10 @@ if (Serial1.available() > 0) {
   
   // TIMER UPDATE
   if (timerSerial > 33 * 1000) {
-    
-    Serial.print(stretchValue);
-    Serial.print(',');
     Serial.flush();
+    Serial.print(millis());
+    Serial.print(',');
+    
     for (int st = 0; st < 4; st++) {
       //      Serial.print(timers[st]*100/period[st]);
       //      Serial.print(',');
