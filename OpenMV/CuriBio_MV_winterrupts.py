@@ -261,6 +261,8 @@ class MaxTracker:
             #     self.hysteresis = std/2  # 1/2 standard deviation
             #     self.hysteresis = (self.hysteresis + delta / 4) / 2
             # max_twitch = self.last_max
+            FIND MAX
+            REMEMBER TIME OF MAX
 
             # a new max verified so add to list of argmax's
             if self.maxes.length() == 0 or self.max_times.signal()[-1] != self.last_tmax:
@@ -442,7 +444,7 @@ class PostAndMagnetTracker:
             #stats_m = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet)
             ##if self.post_centroid is None:
             #stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
-        
+
         self.automatic_thresh = False
         centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
         centroid_p = np.array((stats_p[0].cx(), stats_m[0].cy()))
@@ -634,7 +636,7 @@ class PostAndMagnetTracker:
     def computeStretch(self, tracker):
         stretch_percent = np.array(tracker.signal()) / self.dist_neutral * 100
         return stretch_percent, [],[]
-        
+
     def computeStretchFrequency(self, tracker):
         # Inputs:
         #    tracker: MaxTracker object
@@ -676,7 +678,7 @@ class PostAndMagnetTracker:
         #passiveLengthCalcFlag, dist_neutral, passive_deflection = inputs
         #if passiveLengthCalcFlag == False:
             #self.passive_deflection = None
-        
+
         old_values = value
         width = sensor.width()
         height = sensor.height()
@@ -684,7 +686,7 @@ class PostAndMagnetTracker:
         if self.automatic_thresh:
             stats_m = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet)
             #if self.post_centroid is None:
-	    stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
+        stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
             #else:
                 #stats_p = self.post_centroid
             # stats_m, stats_p = locate_magnet_and_post(img, self.thresh_range, self.area_range, self.roi)
@@ -716,7 +718,7 @@ class PostAndMagnetTracker:
                 centroid_p = None
             else:
                 centroid_p = (stats_p[0].cx(), stats_p[0].cy())
-            
+
             milliseconds = self.maxTracker.time()
             time_of_max = self.maxTracker.time_of_maximums()
             plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
@@ -746,14 +748,14 @@ class PostAndMagnetTracker:
                 #stats_m = [stats_m[0]]  # Choose best one
             #if len(stats_p) > 0:
                 #stats_p = [stats_p[0]]  # Choose best one
-            
+
         # First time through, set the passive deflection (in pixels)
         # Also set the zoom in ranges and the rotation transform
         # First time through or until first max (within first two seconds)
         #if self.passive_deflection is None or (len(self.maxTracker.maximums()) < 1 and capture_time_ms < self.wait_until):
             #self.initPassive(img, stats_m, stats_p)
             #if self.passive_deflection is None:
-		#self.wait_until = capture_time_ms + 2000
+        #self.wait_until = capture_time_ms + 2000
         centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
         centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
         dist_current = np.linalg.norm(centroid_m - centroid_p)
@@ -777,7 +779,7 @@ class PostAndMagnetTracker:
         maximums = self.maxTracker.maximums()
         centroid_m = (stats_m[0].cx(), stats_m[0].cy())
         centroid_p = (stats_p[0].cx(), stats_p[0].cy())
-        
+
         #print(centroid_m)
         plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
         #print(plotting_parameters)
@@ -787,7 +789,7 @@ class PostAndMagnetTracker:
     def initializeTrackingWindow(self, img):
         img.draw_rectangle(self.title_rect, color=10, fill=True)
         return 0, img
-        
+
     def showTrackingOscilloscope(self, img, centroid_m, centroid_p, milliseconds, time_of_max, value):
         # Highlight the location of the magnet and post centroids
         # Show plot of value as a function of milliseconds
@@ -1417,7 +1419,7 @@ def locate_post(img, thresh_range, area_range, roi) -> ({}, {}):
 
     # Filter by ROI
     stats_p = FilterByROI(stats_p, roi_x, roi_y)
-    
+
 
     # if got_one and len(stats_p) == 0:
     #     print("  post filtered out by ROI ", roi)
