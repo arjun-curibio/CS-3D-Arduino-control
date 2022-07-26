@@ -496,7 +496,7 @@ if (Serial1.available() > 0) {
 
   
   // TIMER UPDATE
-  if (timerSerial > 33 * 1000) {
+  if (timerSerial > 50 * 1000) {
 
     Serial.flush();
     Serial.print("-33");

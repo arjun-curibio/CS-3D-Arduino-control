@@ -15,6 +15,11 @@ class CS3D_GUI:
         self.moveToButtons = []
         self.positions = []
         self.positionLabels = []
+        self.motorT = [0,0,0,0]
+        self.freqs = []
+        self.dists = []
+        self.motorEnable = [0,0,0,0]
+        self.motorOverride = [0,0,0,0]
         self.SerialInput = tk.StringVar(self.root, value='1')
         self.output = tk.StringVar(self.root, value='')
         self.pos = tk.IntVar(self.root, 0)
@@ -31,7 +36,8 @@ class CS3D_GUI:
             self.positionLabels.append(tk.Label(self.motorFrames[-1], background='white', foreground='black', textvariable=self.positions[-1]))
             self.moveToButtons.append(tk.Button(self.motorFrames[-1], text='Move Under Well '+str(i+1)))
             
-
+            self.freqs.append(tk.StringVar(self.motorFrames[-1], value='1'))
+            self.dists.append(tk.StringVar(self.motorFrames[-1], value='20'))
             def moveTo(motor=i):
                 string = 'C'+str(motor+1)+','+str(self.WellLocations[motor])
                 self.conn.write((string+'\n').encode())
@@ -55,13 +61,13 @@ class CS3D_GUI:
         self.EnableDisableButton.pack()
         
         self.textLabel = tk.Label(self.root, textvariable=self.SerialInput, fg='black')
-        self.textLabel.pack()
+        # self.textLabel.pack()
         self.close_button = tk.Button(self.root, text="Close", command=root.destroy)
         self.close_button.pack()
     
     def INITCAMERA(self):
         string = 'INIT'
-        self.conn.write()
+        self.conn.write((string+'\n').encode())
 
 
     def sendAdj(self, adj):
@@ -88,22 +94,44 @@ class CS3D_GUI:
 
     def update(self):
         # print(self.pos.get())
-        self.SerialInput.set(self.conn.readline().decode('utf-8')[:-2])
+        string = self.conn.readline().decode('utf-8')[:-2]
+        # print(string)
+        # self.SerialInput.set(string)
         # print(self.SerialInput.get())
         # print(self.SerialInput.get())
-        self.textLabel.update()
+        # self.textLabel.update()
         self.conn.flush()
-
-        self.values = self.SerialInput.get().split(',')
+        
+        
+        self.values = string.split(',')
         self.motorValues = []
         # print(self.values)
         if self.values[0] == '-33':   
             self.t = self.values[1]
+            print(self.t, end=': ')
             for i in range(2,6):
-                print(self.values[i], end=', ')
                 self.motorValues.append(self.values[i])
-                self.positions[i-2].set(self.motorValues[-1].split('&')[2])
+                motorID, motorT, position, dist, freq, motorEnable, motorOverride = tuple(self.motorValues[-1].split('&'))
+                # print(motorID, end=',')
+                # print(motorT, end=',')
+                # print(position, end=',')
+                # print(dist, end=',')
+                # print(freq, end=',')
+                # print(motorEnable, end=',')
+                # print(motorOverride, end=',')
+                # print('//', end=' ')
+                self.motorT[i-2] = int(motorT)
+                self.positions[i-2].set(position)
+                self.freqs[i-2].set(freq)
+                self.dists[i-2].set(dist)
+                self.motorEnable[i-2] = int(motorEnable)
+                self.motorOverride[i-2] = int(motorOverride)
+                
+                print("{0},{1}".format(self.motorT[i-2], self.positions[i-2].get()), end=' // ')
+                # self.positions[i-2].set(self.motorValues[-1].split('&')[2])
+                # self.frequencies[i-2].set()
                 self.positionLabels[i-2].update()
+                # print(' // ', end=' ')
             # print(self.motorValues)
             print(' ')
         # print([self.positions[i].get() for i in range(4)])
