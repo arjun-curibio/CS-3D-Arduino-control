@@ -261,8 +261,8 @@ class MaxTracker:
             #     self.hysteresis = std/2  # 1/2 standard deviation
             #     self.hysteresis = (self.hysteresis + delta / 4) / 2
             # max_twitch = self.last_max
-            FIND MAX
-            REMEMBER TIME OF MAX
+            #FIND MAX
+            #REMEMBER TIME OF MAX
 
             # a new max verified so add to list of argmax's
             if self.maxes.length() == 0 or self.max_times.signal()[-1] != self.last_tmax:
@@ -686,7 +686,7 @@ class PostAndMagnetTracker:
         if self.automatic_thresh:
             stats_m = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet)
             #if self.post_centroid is None:
-        stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
+            stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
             #else:
                 #stats_p = self.post_centroid
             # stats_m, stats_p = locate_magnet_and_post(img, self.thresh_range, self.area_range, self.roi)

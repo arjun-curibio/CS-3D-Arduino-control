@@ -104,11 +104,12 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
         #       start sending feedback, toggle feedbackFlag=True
         #print(uart.any())
         if uart.any():
-            val = uart.readline()
+            val = uart.read()
             print(len(val))
             if len(val) > 4:
-
-                val = val[:-1].decode('utf-8')
+                val = val.decode('utf-8')
+                print(val)
+                val = val.split('#')[0]
                 print(val)
                 val = str(val)
                 #print(val)
@@ -125,7 +126,6 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                     centroid_p_passive[current_well-1] = (int(infos[6]), int(infos[7]))
                 elif infos[1] == 'POST':
                     updatePostCentroid = True
-
 
         #print(val)
         tic = utime.ticks_ms() - t0

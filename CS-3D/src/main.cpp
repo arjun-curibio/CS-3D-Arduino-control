@@ -343,12 +343,14 @@ void loop() {
       }
       Serial1.print(CameraUnderWell);
       Serial1.print('&');
-      Serial1.println("INIT");
+      Serial1.print("INIT");
+      Serial.println('#');
     }
     else if (SerialInput.substring(0, 4) == "POST") {
       Serial1.print(CameraUnderWell);
       Serial1.print('&');
-      Serial1.println("POST");
+      Serial1.print("POST");
+      Serial.println('#');
     }
 
     // MOTOR COMMANDS
@@ -407,7 +409,8 @@ void loop() {
       Serial1.print('&');
       Serial1.print(post_centroid[CameraUnderWell-1][0]);
       Serial1.print('&');
-      Serial1.println(post_centroid[CameraUnderWell-1][1]);
+      Serial1.print(post_centroid[CameraUnderWell-1][1]);
+      Serial.println('#');
       
       CameraMove(CameraPosition);
     }

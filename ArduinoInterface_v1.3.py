@@ -53,6 +53,7 @@ class CS3D_GUI:
             self.positionLabels[-1].pack()
         
         self.InitCamera = tk.Button(self.root, text='INIT Camera', command=self.INITCAMERA)
+        self.InitCamera.pack()
         self.Output = tk.Entry(self.root, textvariable=self.output)
         self.Output.bind('<Return>', func=lambda val: self.sendOutput())
         self.Output.pack()
@@ -108,7 +109,8 @@ class CS3D_GUI:
         if self.values[0] == '-33':   
             self.t = self.values[1]
             print(self.t, end=': ')
-            for i in range(2,6):
+            n_before_motors = 3
+            for i in range(n_before_motors,n_before_motors+4):
                 self.motorValues.append(self.values[i])
                 motorID, motorT, position, dist, freq, motorEnable, motorOverride = tuple(self.motorValues[-1].split('&'))
                 # print(motorID, end=',')
@@ -119,17 +121,17 @@ class CS3D_GUI:
                 # print(motorEnable, end=',')
                 # print(motorOverride, end=',')
                 # print('//', end=' ')
-                self.motorT[i-2] = int(motorT)
-                self.positions[i-2].set(position)
-                self.freqs[i-2].set(freq)
-                self.dists[i-2].set(dist)
-                self.motorEnable[i-2] = int(motorEnable)
-                self.motorOverride[i-2] = int(motorOverride)
+                self.motorT[i-n_before_motors] = int(motorT)
+                self.positions[i-n_before_motors].set(position)
+                self.freqs[i-n_before_motors].set(freq)
+                self.dists[i-n_before_motors].set(dist)
+                self.motorEnable[i-n_before_motors] = int(motorEnable)
+                self.motorOverride[i-n_before_motors] = int(motorOverride)
 
-                print("{0},{1}".format(self.motorT[i-2], self.positions[i-2].get()), end=' // ')
+                print("{0},{1}".format(self.motorT[i-n_before_motors], self.positions[i-n_before_motors].get()), end=' // ')
                 # self.positions[i-2].set(self.motorValues[-1].split('&')[2])
                 # self.frequencies[i-2].set()
-                self.positionLabels[i-2].update()
+                self.positionLabels[i-n_before_motors].update()
                 # print(' // ', end=' ')
             # print(self.motorValues)
             print(' ')
