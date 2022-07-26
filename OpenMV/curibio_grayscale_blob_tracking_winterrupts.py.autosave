@@ -88,6 +88,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
 
     initFlag = [False, False, False, True] # triggers high if need to init tracker
     isInit = [False, False, False, False]
+    updatePostCentroid = False
     #for i in range(0, nframes):
     while (True):
         inputs = (passiveLengthCalcFlag, passive_length[current_well-1], passive_deflection)
@@ -118,9 +119,12 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                     initFlag[current_well - 1] = True
                 elif infos[1] == 'CHANGE':
                     #print(infos)
-                    passive_length[current_well-1]     = int(infos[2])
-                    post_thresh[current_well-1]     = (int(infos[3]),int(infos[4]))
-                    magnet_thresh[current_well-1]   = (int(infos[5]),int(infos[6]))
+                    passive_length[current_well-1]  = int(infos[2])
+                    magnet_thresh[current_well-1]   = (int(infos[3]),int(infos[4]))
+                    post_thresh[current_well-1]     = (int(infos[5]),int(infos[6]))
+                    centroid_p_passive[current_well-1] = (int(infos[6]), int(infos[7]))
+                elif infos[1] == 'POST':
+                    updatePostCentroid = True
 
 
         #print(val)
@@ -153,8 +157,28 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             magnet_thresh[current_well-1] = tracker.thresh_range[0]
             post_thresh[current_well-1] = tracker.thresh_range[1]
             isInit[current_well - 1] = True
-            continue
+            
+            printstring = "-43"
+            printstring += '&'
+            printstring += str(tic/1000)
+            printstring += '&'
+            printstring += str(current_well)
+            printstring += '&'
+            printstring += str(passive_length)
+            printstring += '&'
+            printstring += str(magnet_thresh)
+            printstring += '&'
+            printstring += str(post_thresh)
+            printstring += '&'
+            printstring += str(centroid_p_passive)
+            
+            print(printstring + str(frame_rate))
+            
+            uart.write(printstring + '\n')
 
+            continue
+        
+        
         #print(on)
         if activeFeedbackFlag: # stop running tracker
             toc = utime.ticks_ms() - t0
@@ -191,6 +215,10 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             #print(centroid_m[current_well-1], end=', ')
             #print(centroid_p[current_well-1])
             #print(centroid_m[current_well-1])
+            if updatePostCentroid == True:
+                centroid_p_passive[current_well-1] = centroid_p[current_well-1]
+                updatePostCentroid = False
+            
             ret, rotated = tracker.showTrackingOscilloscope(img, centroid_m[current_well-1], centroid_p_passive[current_well-1], milliseconds, time_of_max, value)
             #ret, rotated, value, plotting_parameters, inputs = tracker.processImage(img, tic, value, plotting_parameters, inputs, cb.PostAndMagnetTracker.computeStretchFrequency)
             #ret, rotated, value, plotting_parameters = tracker.processImage(img, tic, value, plotting_parameters, cb.PostAndMagnetTracker.computeStretchFrequency)
@@ -242,6 +270,8 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                 frame_rate = 1000.0/(toc-tic)
                 tracker.setFps(frame_rate)  # Used to compute beat_frequency
                 #print(frame_rate)
+            
+            
 
 
 

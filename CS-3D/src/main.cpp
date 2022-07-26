@@ -60,7 +60,7 @@ boolean enableState[4]    = { LOW,  LOW,  LOW,  LOW};
 // CAMERA VARIABLES
 int     CameraUnderWell     = 1;
 boolean MovingCamera        = LOW;
-int 	CameraSpeed 		      = 2000;
+int 	  CameraSpeed 		    = 2000;
 int     CameraPosition      = 150;
 boolean enableStateCamera   = LOW; // LOW to disable
 boolean ResetCameraFlag     = HIGH;
@@ -73,7 +73,7 @@ elapsedMicros timerSerial;
 
 // COMMUNICATION VARIABLES
 String SerialInput;
-String OpenMVInput;
+String mv;
 boolean recievedHandshake = LOW;
 char serial1buffer[2000];
 int sizeOfSerialBuffer;
@@ -86,6 +86,7 @@ float last_max_stretch = 0.;
 int passive_len[4] = {100,100,100,100};
 int mag_thresh[4][2] = {{20,40}, {20,40}, {20,40}, {20,40}};
 int post_thresh[4][2] = { {0, 15}, {0, 15}, {0, 15}, {0, 15}};
+int post_centroid[4][2] = { {0,0}, {0,0}, {0,0}, {0,0}};
 
 AccelStepper *stArray[4];
 AccelStepper stCamera(1, STEPCAMERA, DIRCAMERA);
@@ -331,7 +332,27 @@ void loop() {
     // Serial.println(SerialInput.substring(0, SerialInput.length() - 1));
     Serial.flush();
 
-    if (SerialInput.substring(0, 1) == "M") { // enable/disable Motor
+
+    // CAMERA COMMANDS PASS THROUGH TO OPENMV 
+    if (SerialInput.substring(0, 4) == "INIT") {
+      // camera initialization routine
+      CameraUnderWell = SerialInput.substring(5,6).toInt();
+      if (enableState[CameraUnderWell-1] == LOW) {
+        MotorEnable(CameraUnderWell-1);
+        // MAYBE: wait for motor to fully retract, without pausing other motors
+      }
+      Serial1.print(CameraUnderWell);
+      Serial1.print('&');
+      Serial1.println("INIT");
+    }
+    else if (SerialInput.substring(0, 4) == "POST") {
+      Serial1.print(CameraUnderWell);
+      Serial1.print('&');
+      Serial1.println("POST");
+    }
+
+    // MOTOR COMMANDS
+    else if (SerialInput.substring(0, 1) == "M") { // enable/disable Motor
       int st = SerialInput.substring(1, 2).toInt() - 1;
       MotorEnable(st);
     }
@@ -365,9 +386,29 @@ void loop() {
       int ADJ = SerialInput.substring(3, SerialInput.length() - 1).toInt();
       MotorAdjust(st, ADJ);
     }
+
+    // CAMERA STAGE COMMANDS
     else if (SerialInput.substring(0, 1) == "C") { // Camera move
       CameraUnderWell = SerialInput.substring(1,2).toInt();
       CameraPosition = SerialInput.substring(3,SerialInput.length()-1).toInt();
+      Serial1.print(CameraUnderWell);
+      Serial1.print('&');
+      Serial1.print("CHANGE");
+      Serial1.print('&');
+      Serial1.print(passive_len[CameraUnderWell-1]);
+      Serial1.print('&');
+      Serial1.print(mag_thresh[CameraUnderWell-1][0]);
+      Serial1.print('&');
+      Serial1.print(mag_thresh[CameraUnderWell-1][1]);
+      Serial1.print('&');
+      Serial1.print(post_thresh[CameraUnderWell-1][0]);
+      Serial1.print('&');
+      Serial1.print(post_thresh[CameraUnderWell-1][1]);
+      Serial1.print('&');
+      Serial1.print(post_centroid[CameraUnderWell-1][0]);
+      Serial1.print('&');
+      Serial1.println(post_centroid[CameraUnderWell-1][1]);
+      
       CameraMove(CameraPosition);
     }
     else if (SerialInput.substring(0, 1) == "V") { // camera reset
@@ -387,45 +428,65 @@ void loop() {
 
 if (Serial1.available() > 0) {
     //    val = Serial1.read
-    // int valueCount = 0;
-    // String values[20];
-    OpenMVInput = Serial1.readStringUntil('\n');
+    mv = Serial1.readStringUntil('\n');
     Serial1.flush();
-    Serial.println(OpenMVInput);
-    // Serial.println(OpenMVInput);
-    // while (OpenMVInput.length() > 0) {
-    //   int index = OpenMVInput.indexOf('&');
-    //   if (index == -1) { // at end of string
-    //     values[valueCount++] = OpenMVInput;
-    //     break;
-    //   }
-    //   else {
-    //     values[valueCount++] = OpenMVInput.substring(0, index);
-    //     OpenMVInput = OpenMVInput.substring(index+1);
-    //   }
-    // }
+    Serial.println(mv);
+    
+    int index = mv.indexOf('&'); // find first &
+    int magic = mv.substring(0, index).toInt(); // store first substring as magic number
+    mv = mv.substring(index+1); // remove magic number
+    Serial.print(magic);
+    if (magic == -35){ // <t>&<stretch>&<max_stretch>&<current_well>\n
+      
+      index = mv.indexOf('&');
+      t_camera = mv.substring(0, index).toFloat();
+      mv = mv.substring(index+1);
+
+      index = mv.indexOf('&');
+      stretchValue = mv.substring(0, index).toFloat();
+      mv = mv.substring(index+1); // remove magic number
+
+      index = mv.indexOf('&');
+      last_max_stretch = mv.substring(0, index).toFloat();
+      mv = mv.substring(index+1); // remove magic number
+      
+      index = mv.indexOf('&');
+      CameraUnderWell = mv.substring(0, index).toInt();
+      mv = mv.substring(index+1); // remove magic number
+
+    }
+
+    if (magic == -43) { // <t>&<current_well>&<passive_length>&<magnet_thresh>&<post_threshold>&<centroid_post>\n
+      index = mv.indexOf('&');
+      CameraUnderWell = mv.substring(0, index).toInt();
+      mv = mv.substring(index+1);
+
+      index = mv.indexOf('&');
+      passive_len[CameraUnderWell-1] = mv.substring(0, index).toInt();
+      mv = mv.substring(index+1); // remove magic number
+
+      index = mv.indexOf('&');
+      int index2 = mv.indexOf(',', index);
+      mag_thresh[CameraUnderWell-1][0] = mv.substring(1, index2).toInt();
+      mag_thresh[CameraUnderWell-1][1] = mv.substring(index2+1, index-1).toInt();
+      mv = mv.substring(index+1); // remove magic number
+
+      index = mv.indexOf('&');
+      index2 = mv.indexOf(',', index);
+      post_thresh[CameraUnderWell-1][0] = mv.substring(1, index2).toInt();
+      post_thresh[CameraUnderWell-1][1] = mv.substring(index2+1, index-1).toInt();
+      mv = mv.substring(index+1); // remove magic number
+
+      index = mv.indexOf('&');
+      index2 = mv.indexOf(',', index);
+      post_centroid[CameraUnderWell-1][0] = mv.substring(1, index2).toInt();
+      post_centroid[CameraUnderWell-1][1] = mv.substring(index2+1, index-1).toInt();
+      mv = mv.substring(index+1); // remove magic number
+    }
+    Serial.println(mv);
+    
   }
-  // if (Serial1.available() > 0) {
-  //   int valueCount = 0;
-  //   float values[20];
-  //   OpenMVInput = Serial1.readString();
-  //   Serial1.flush();
-  //   while (OpenMVInput.length() > 0) {
-  //     int index = OpenMVInput.indexOf('&');
-  //     if (index == -1) {
-  //       values[valueCount++] = OpenMVInput.toFloat();
-  //       break;
-  //     }
-  //     else {
-  //       values[valueCount++] = OpenMVInput.substring(0, index).toFloat();
-  //       OpenMVInput = OpenMVInput.substring(index+1);
-  //     }
-  //   }
-  //   t_camera = values[0];
-  //   stretchValue = values[1];
-  //   frequencyValue = values[2];
-  //   float last_max_stretch = values[3];
-  // }
+
   // MOTOR UPDATE
   for (int st = 0; st < 4; st++) {
     if (timers[st] > period[st])  {
@@ -501,7 +562,15 @@ if (Serial1.available() > 0) {
     Serial.flush();
     Serial.print("-33");
     Serial.print(',');
-    Serial.print(millis());
+    Serial.print(millis()); // Arduino Time
+    Serial.print(',');
+    Serial.print(t_camera);
+    Serial.print('&');
+    Serial.print(CameraUnderWell);
+    Serial.print('&');
+    Serial.print(stretchValue);
+    Serial.print('&');
+    Serial.print(last_max_stretch);
     Serial.print(',');
     
     for (int st = 0; st < 4; st++) {

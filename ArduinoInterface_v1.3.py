@@ -102,7 +102,6 @@ class CS3D_GUI:
         # self.textLabel.update()
         self.conn.flush()
         
-        
         self.values = string.split(',')
         self.motorValues = []
         # print(self.values)
@@ -126,7 +125,7 @@ class CS3D_GUI:
                 self.dists[i-2].set(dist)
                 self.motorEnable[i-2] = int(motorEnable)
                 self.motorOverride[i-2] = int(motorOverride)
-                
+
                 print("{0},{1}".format(self.motorT[i-2], self.positions[i-2].get()), end=' // ')
                 # self.positions[i-2].set(self.motorValues[-1].split('&')[2])
                 # self.frequencies[i-2].set()
