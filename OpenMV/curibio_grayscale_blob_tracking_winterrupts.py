@@ -11,8 +11,8 @@ from pyb import Pin, LED, UART
 pin7 = Pin('P7', Pin.IN, Pin.PULL_UP)  # Connected to pin 7
 #green_led = LED(2)
 red_led   = LED(1)
-uart = UART(3, 9600, timeout = 0)
-uart.init(9600, timeout = 0)
+uart = UART(3, 9600, timeout = 1)
+uart.init(9600, timeout = 1)
 
 val = 0
 # Color Tracking Thresholds (Grayscale Min, Grayscale Max)
@@ -31,28 +31,32 @@ def magnet_post_cb(blob) -> bool:
     # check post araa thresholds + circularity
     return True
 
-
+magnet_thresh_init = (0,40)
+post_thresh_init = (0,17)
 def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                                centroid_post=(259, 213),
-                               thresh_range=((0, 40), (20, 60)),
-                               area_range=((0, 1500), (3000, 10000)),
+                               thresh_range=(magnet_thresh_init, post_thresh_init),
+                               area_range=((0, 2000), (3000, 10000)),
                                outfile=None):
     sensor.reset()
     sensor.set_pixformat(sensor.GRAYSCALE)
     sensor.set_framesize(sensor.VGA)
-    sensor.skip_frames(time = 2000)
+    sensor.skip_frames(time = 1000)
     sensor.set_auto_gain(False) # must be turned off for color tracking
     sensor.set_auto_whitebal(False) # must be turned off for color tracking
     clock = time.clock()
-
+    
+    #global magnet_thresh
+    #global post_thresh
     fps = 15  # Target FPS
     nframes = 30*fps  # Process 30 seconds worth
     print(sensor.height())
     ROI_post	    = (	0,	250,			160,	320) # x, y, w, h
-    ROI_magnet	    = (    250,	sensor.width(),	160,	320)
+    ROI_magnet	    = (    350,	sensor.width(),	160,	320)
     
     tracker = cb.PostAndMagnetTracker(fps, nframes, thresh_range, area_range, roi_post = ROI_post, roi_magnet = ROI_magnet)
-
+    
+    
     if outfile is not None:
         output = mpeg.Mjpeg(outfile)
     else:
@@ -62,35 +66,102 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     frame_rate = 0
     t0 = utime.ticks_ms()
     running = True
-    starting_stretch = 0
-    starting_freq = 0
-    starting_max_stretch = 0
-    value = ([starting_stretch], [starting_freq], [starting_max_stretch])
-    centroid_m = (254, 376)
-    centroid_p = (259, 213)
+    stretch = 0
+    freq = 0
+    max_stretch = 0
+    value = ([stretch], [freq], [max_stretch])
+    centroid_m          = [(0,0),       (0,0),      (0,0),      (0,0)]
+    centroid_p          = [(0,0),       (0,0),      (0,0),      (0,0)]
+    centroid_m_passive  = [(0,0),       (0,0),      (0,0),      (0,0)]
+    centroid_p_passive  = [(0,0),       (0,0),      (0,0),      (0,0)]
+    post_thresh         = [post_thresh_init,post_thresh_init,post_thresh_init,post_thresh_init]
+    magnet_thresh       = [magnet_thresh_init,magnet_thresh_init,magnet_thresh_init,magnet_thresh_init]
+
     milliseconds = 0
     time_of_max =  0
-
+    current_well = 4
+    wellLabels = ['A','B','C','D']
+    passive_length = [-1, -1, -1, -1]
     plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
+    passiveLengthCalcFlag = False
+    passive_deflection = 0
+    
+    initFlag = [False, False, False, True] # triggers high if need to init tracker
+    isInit = [False, False, False, False]
     #for i in range(0, nframes):
     while (True):
-        val = uart.readline()
-        if val == None:
-            pass
-        else:
-            val = val[:-1].decode('utf-8')
-        print(val)
+        inputs = (passiveLengthCalcFlag, passive_length[current_well-1], passive_deflection)
+        
+        # uart inputs:
+        #   <current well>&<command>&<information>
+        #   <command> = 'INIT'
+        #       initialze tracker, calculate passive length, return passive length
+        #   <command> = 'CHANGE'
+        #       change which well camera is under, update passive length, and thresholds
+        #       <passive_len>&<post_thresh>&<mag_thresh>
+        #   <command> = 'START'
+        #       start sending feedback, toggle feedbackFlag=True
+        #print(uart.any())
+        if uart.any():
+            val = uart.readline()
+            print(len(val))
+            if len(val) > 4:
+                
+                val = val[:-1].decode('utf-8')
+                print(val)
+                val = str(val)
+                #print(val)
+                infos = val.split('&')
+                #print(infos)
+                current_well = int(infos[0])
+                if infos[1] == 'INIT':
+                    initFlag[current_well - 1] = True
+                elif infos[1] == 'CHANGE':
+                    #print(infos)
+                    passive_length[current_well-1]     = int(infos[2])
+                    post_thresh[current_well-1]     = (int(infos[3]),int(infos[4]))
+                    magnet_thresh[current_well-1]   = (int(infos[5]),int(infos[6]))
+            
+        
+        #print(val)
         tic = utime.ticks_ms() - t0
+        
         # clock.tick()
         img = sensor.snapshot()
 
         # Query the toggle button (pin7)
-        on = pin7.value()
+        activeFeedbackFlag = pin7.value()
+        
+        #print(initFlag)
+        if initFlag[current_well-1]:
+            initFlag[current_well-1] = False
+            stats_m = cb.locate_magnet(img, tracker.thresh_range, tracker.area_range, ROI_magnet)
+            stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post)
+            if len(stats_m) == 0 or len(stats_p) == 0:
+                print(len(stats_m))
+                print(len(stats_p))
+                tracker.thresh_range, tracker.area_range = cb.determineThresholds(img, tracker.area_range, tracker.roi, tracker.roi_post, tracker.roi_magnet, visualize=False)
+                stats_m = cb.locate_magnet(img, tracker.thresh_range, tracker.area_range, ROI_magnet)
+                stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post)
+                print(tracker.thresh_range)
+            centroid_m_passive[current_well-1], centroid_p_passive[current_well-1] = tracker.initPassive(img, stats_m, stats_p)
+            centroid_p_passive[current_well-1] = tuple(list(centroid_p_passive[current_well-1]))
+            centroid_m_passive[current_well-1] = tuple(list(centroid_m_passive[current_well-1]))
+            
+            passive_length[current_well-1] = tracker.dist_neutral
+            print(tracker.dist_neutral)
+            magnet_thresh[current_well-1] = tracker.thresh_range[0]
+            post_thresh[current_well-1] = tracker.thresh_range[1]
+            isInit[current_well - 1] = True
+            continue
+            
         #print(on)
-        if on: # stop running tracker
-	    continue
-	
-	
+        if activeFeedbackFlag: # stop running tracker
+            toc = utime.ticks_ms() - t0
+            frame_rate = 1000.0/(toc-tic)
+            print('stopped'+str(frame_rate))
+            continue
+        
         #if on and running and tic > 500:
             ##green_led.off()
             #red_led.on()
@@ -110,38 +181,65 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             #t0 = utime.ticks_ms()
             #running = True
             #continue
-
+            
         # Paused?
-        if not running:
-            continue;
         
-        ret, rotated, value, plotting_parameters = tracker.processImage(img, tic, value, plotting_parameters, cb.PostAndMagnetTracker.computeStretchFrequency)
-        #value = ((0),(0),(0))
-        ret = 0
-        if ret != 0:
-            continue
-        if output is not None:
-            output.add_frame(img)
-
-        toc = utime.ticks_ms() - t0
-        if (toc > tic):
-            frame_rate = 1000.0/(toc-tic)
-            tracker.setFps(frame_rate)  # Used to compute beat_frequency
-            #print(frame_rate)
-
-        # For now display tracking info on console.
-        if len(value[0]) > 0 and len(value[1]) > 0:
-            #print("%.0f\t%.1f\t%.1f\t%.1f\t%.2f" % (tic, value[0][-1], value[1][-1], value[2], frame_rate) )  # stretch, beat_freq, max_stretch, fps
-            t = uart.write("%.0f&%.1f&%.1f&%.1f&#\n" % (tic, value[0][-1], value[1][-1], value[2]) ) 
-        elif len(value[0]) > 0 and len(value[1]) == 0:
-            #print("%.0f\t%.1f\tNaN\tNaN\t%.2f" % (tic, value[0][-1], frame_rate) )  # stretch, beat_freq, max_stretch, fps
-            uart.write("%.0f&%.1f&NaN&NaN&#\n" % (tic, value[0][-1]) )  # stretch, beat_freq, max_stretch, fps
-        elif len(value[0]) == 0 and len(value[1]) >= 0:
-            #print("%.0f\tNaN\t%.1f\tNaN\t%.2f" % (tic, value[1][-1], frame_rate) )  # stretch, beat_freq, max_stretch, fps
-            uart.write("%.0f&NaN&%.1f&NaN&#\n" % (tic, value[1][-1]) )  # stretch, beat_freq, max_stretch, fps
-        else:
-            #print("%.0f\tNaN\tNaN\tNaN\t%.2f" % (tic, frames_per_second) )  # stretch, beat_freq, fps
-            uart.write("%.0f&NaN&NaN&NaN&#\n" % (tic) )  # stretch, beat_freq, fps
+        if isInit[current_well-1]:
+            value, plotting_parameters = tracker.processImage(img, tic, value, plotting_parameters, cb.PostAndMagnetTracker.computeStretch)
+            #print(plotting_parameters)
+            centroid_m[current_well-1], centroid_p[current_well-1], milliseconds, time_of_max, dummy = plotting_parameters
+            #print(centroid_m[current_well-1], end=', ')
+            #print(centroid_p[current_well-1])
+            #print(centroid_m[current_well-1])
+            ret, rotated = tracker.showTrackingOscilloscope(img, centroid_m[current_well-1], centroid_p_passive[current_well-1], milliseconds, time_of_max, value)
+            #ret, rotated, value, plotting_parameters, inputs = tracker.processImage(img, tic, value, plotting_parameters, inputs, cb.PostAndMagnetTracker.computeStretchFrequency)
+            #ret, rotated, value, plotting_parameters = tracker.processImage(img, tic, value, plotting_parameters, cb.PostAndMagnetTracker.computeStretchFrequency)
+            
+            passiveLengthCalcFlag, passive_len, passive_deflection = inputs
+            #value = ((0),(0),(0))
+            ret = 0
+            if ret != 0:
+                continue
+            if output is not None:
+                output.add_frame(img)
+    
+            
+            if  len(value[0]) > 0 and len(value[1]) > 0:
+                stretch = value[0][-1]
+                freq = value[1][-1]
+                max_stretch = value[2]
+            elif len(value[0]) > 0 and len(value[1]) == 0:
+                stretch = value[0][-1]
+                freq = 'Error'
+                max_stretch = 'Error'
+            elif len(value[0]) == 0 and len(value[1]) >= 0:
+                stretch = 'Error'
+                freq = value[1][-1]
+                max_stretch = 'Error'
+            else:
+                stretch = 'Error'
+                freq = 'Error'
+                max_stretch = 'Error'
+            
+            printstring = str(tic/1000)
+            printstring += '&'
+            printstring += str(stretch)
+            printstring += '&'
+            printstring += str(max_stretch)
+            printstring += '&'
+            printstring += str(current_well)
+            printstring += '&'
+            
+            #printstring = str(inputs)
+            
+            print(printstring + str(frame_rate) + '#')
+            uart.write(printstring + '#\n')
+            
+            toc = utime.ticks_ms() - t0
+            if (toc > tic):
+                frame_rate = 1000.0/(toc-tic)
+                tracker.setFps(frame_rate)  # Used to compute beat_frequency
+                #print(frame_rate)
 
 
 

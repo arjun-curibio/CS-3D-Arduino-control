@@ -434,7 +434,16 @@ class PostAndMagnetTracker:
         # Assume all images will be the same size
         height = sensor.height()
         width = sensor.width()
-
+        print(stats_m)
+        print(stats_p)
+        #if len(stats_m) == 0 or len(stats_p) == 0:
+            ## print('Automatic num_m=', len(stats_m), ' num_p=', len(stats_p),' roi=', self.roi)
+            #self.thresh_range, self.area_range = determineThresholds(img, self.area_range, self.roi, self.roi_post, self.roi_magnet, visualize=True)
+            #stats_m = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet)
+            ##if self.post_centroid is None:
+            #stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
+        
+        self.automatic_thresh = False
         centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
         centroid_p = np.array((stats_p[0].cx(), stats_m[0].cy()))
         dx = centroid_m[0] - centroid_p[0]
@@ -448,27 +457,23 @@ class PostAndMagnetTracker:
             self.dist_neutral = max(self.dist_neutral, dist_current)
             self.passive_deflection = self.dist_neutral - dist_current  # Distance between posts during relaxation of issue
         else:
-             # # Determine the amount of rotation necessary to get the post and magnet to be horizontal
+            # # Determine the amount of rotation necessary to get the post and magnet to be horizontal
             # self.angle = math.atan2(dy, dx)
             #
             # # Make rotation transform
             # self.trans = makehgtform('translate', (width // 2, height // 2, 0),
             #                          'zrotate', -self.angle,
             #                          'translate', (-width // 2, -height // 2, 0))
-
             # dist_current = distance.euclidean(centroid_m, centroid_p)  # distance between post and magnet
             self.dist_neutral = dist_current
             # print("dist_neutral=",self.dist_neutral)
             # print("dist_current=",dist_current)
             self.passive_deflection = self.dist_neutral - dist_current  # Distance between posts
-
             # Determine the scale of the image using the dist_neutral
             self.microns_per_pixel = 8000 / self.dist_neutral  # For now assume the magnet and post are 8 mm away
-
             # # Rotate centroid (for zoom computation)
             # centroid_m = self.trans.apply2D(centroid_m)
             # centroid_p = self.trans.apply2D(centroid_p)
-
             # # zoom into post+magnet (of rotated img)
             # # Make post+magnet take up 90% of the screen (zoom in)
             center = np.floor((centroid_m + centroid_p) / 2)
@@ -480,28 +485,24 @@ class PostAndMagnetTracker:
             #
             # # Position of zoom rect
             self.zoom_rect = (min_col, min_row, max_col - min_col, max_row - min_row)
-
             # Remember post centroid.  Comment this out to compute the post centroid each time
             self.post_centroid = stats_p
-
             # Determine location of title rect
             self.title_rect = (min_col, max(min_row - title_height, 0), max_col - min_col, title_height)
-
             # Determine location of oscilloscope rect
             oscilloscope_height = max(height - max_row, 120)
             self.oscilloscope_rect = (min_col, min(max_row, height-oscilloscope_height), max_col - min_col, oscilloscope_height)
-
             # Determine location of axes_rect
             self.axes_rect = (min_col + left_padding,
                               self.oscilloscope_rect[1] + top_padding,
                               max_col - min_col - left_padding - right_padding,
                               oscilloscope_height - top_padding - bottom_padding)
-
             # Selection rectangle within image (includes title and oscilloscope areas)
             # print("min_row=",min_row," title_height=",title_height)
             # print("max_row=",max_row," oscil_height=",oscilloscope_height)
             self.rows = range(min_row - title_height, max_row + oscilloscope_height)
             self.cols = range(min_col, max_col)
+        return centroid_m, centroid_p
 
     def computeStretch(self, displacement, maximums):
         stretch_percent = displacement / self.dist_neutral * 100  # percent of the neutral displacement
@@ -555,7 +556,6 @@ class PostAndMagnetTracker:
         if math.fabs(yavg) == 0.0:  # Avoid divide by zero
             ymin = ymin - 0.5
             ymax = ymax + 0.5
-
         # Update ylim based on new y
         if leftright==0:
             ymin = min(self.ylim_left[0], ymin)
@@ -565,7 +565,6 @@ class PostAndMagnetTracker:
             ymin = min(self.ylim_right[0], ymin)
             ymax = max(self.ylim_right[1], ymax)
             self.ylim_right = (ymin, ymax)
-
         # Update x range of plot
         self.millisecs = max(self.millisecs, x[-1]-x[0])
 
@@ -601,20 +600,16 @@ class PostAndMagnetTracker:
                                   color, thickness=linewidth)
                     last_pt = xypts[i]
                     img.draw_circle(int(xypts[i][0]), int(xypts[i][1]), 3, color, thickness=1, fill=True)
-
         img.draw_circle(int(xypts[-1][0]), int(xypts[-1][1]), 5, color, fill=True)
-
         # Determine y limit strings (display at least two digits)
         if math.fabs(ymin) < 10 < math.fabs(ymax):
             ylim = ("%.0f" % ymin, "%.0f" % ymax)
         else:
             ylim = ("%0.1f" % ymin, "%0.1f" % ymax)
-
         # # determine size of each label string (aids in placement)
         label_font_size = self.font_scale
         ylim_siz = (EstTextSize(ylim[0], scale=label_font_size), EstTextSize(ylim[1], scale=label_font_size))
         baseline = (0, 0)
-
         # Add labels on the left
         if leftright == 0:
             img.draw_string(rect[0] - ylim_siz[0][0],
@@ -625,7 +620,6 @@ class PostAndMagnetTracker:
                             rect[1] + baseline[0] - ylim_siz[1][1] // 2,
                             ylim[1],
                             color=color, scale=label_font_size, mono_space=False)
-
         # Add labels on the right
         else:
             # Add frequency axis limits
@@ -637,14 +631,17 @@ class PostAndMagnetTracker:
                             rect[1] + baseline[0] - ylim_siz[1][1] // 2,
                             ylim[1],
                             color=color, scale=label_font_size, mono_space=False)
-
+    def computeStretch(self, tracker):
+        stretch_percent = np.array(tracker.signal()) / self.dist_neutral * 100
+        return stretch_percent, [],[]
+        
     def computeStretchFrequency(self, tracker):
         # Inputs:
         #    tracker: MaxTracker object
         # Outputs:
         #    stretch_percent, frequency, last_max_percent
         stretch_percent = np.array(tracker.signal()) / self.dist_neutral * 100  # percent of the neutral displacement
- #       maximums = tracker.maximums()
+        #       maximums = tracker.maximums()
         time_of_max = tracker.time_of_maximums() # in milliseconds
         if time_of_max is not None:
             if len(time_of_max) > 1:
@@ -652,7 +649,6 @@ class PostAndMagnetTracker:
                 # Compute beat frequency from signal
                 if np.any(np.diff(time_of_max) == 0):
                     print('Got zero')
-
                 # Estimate frequency of maximums
                 f = 1000.0 / np.diff(time_of_max)
                 # f = np.zeros((len(maximums)-1))
@@ -677,6 +673,10 @@ class PostAndMagnetTracker:
 
     def processImage(self, img, capture_time_ms, value, plotting_parameters, func):
         # Locate magnet and post
+        #passiveLengthCalcFlag, dist_neutral, passive_deflection = inputs
+        #if passiveLengthCalcFlag == False:
+            #self.passive_deflection = None
+        
         old_values = value
         width = sensor.width()
         height = sensor.height()
@@ -708,10 +708,22 @@ class PostAndMagnetTracker:
             stats_p = [stats_p[0]]  # Choose best one
 
         if len(stats_m) == 0 or len(stats_p) == 0:
-            centroid_m, centroid_p, milliseconds, time_of_max, value = plotting_parameters
-            ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
-            plotting_parameters = (centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
-            return -1, img, old_values, plotting_parameters
+            if len(stats_m) == 0:
+                centroid_m = None
+            else:
+                centroid_m = (stats_m[0].cx(), stats_m[0].cy())
+            if len(stats_p) == 0:
+                centroid_p = None
+            else:
+                centroid_p = (stats_p[0].cx(), stats_p[0].cy())
+            
+            milliseconds = self.maxTracker.time()
+            time_of_max = self.maxTracker.time_of_maximums()
+            plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
+            #centroid_m, centroid_p, milliseconds, time_of_max, value = plotting_parameters
+            #ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
+            #plotting_parameters = (centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
+            return old_values, plotting_parameters
             ## Automatically choose a new thresh_range
             ##thresh_range, area_range = determineThresholds(img, self.area_range, self.roi,  self.roi_post, self.roi_magnet)
             #if thresh_range[0] is None or thresh_range[1] is None:
@@ -738,10 +750,10 @@ class PostAndMagnetTracker:
         # First time through, set the passive deflection (in pixels)
         # Also set the zoom in ranges and the rotation transform
         # First time through or until first max (within first two seconds)
-        if self.passive_deflection is None or (len(self.maxTracker.maximums()) < 1 and capture_time_ms < self.wait_until):
-            self.initPassive(img, stats_m, stats_p)
-            if self.passive_deflection is None:
-		self.wait_until = capture_time_ms + 2000
+        #if self.passive_deflection is None or (len(self.maxTracker.maximums()) < 1 and capture_time_ms < self.wait_until):
+            #self.initPassive(img, stats_m, stats_p)
+            #if self.passive_deflection is None:
+		#self.wait_until = capture_time_ms + 2000
         centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
         centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
         dist_current = np.linalg.norm(centroid_m - centroid_p)
@@ -763,10 +775,19 @@ class PostAndMagnetTracker:
         milliseconds = self.maxTracker.time()
         time_of_max = self.maxTracker.time_of_maximums()
         maximums = self.maxTracker.maximums()
+        centroid_m = (stats_m[0].cx(), stats_m[0].cy())
+        centroid_p = (stats_p[0].cx(), stats_p[0].cy())
+        
+        #print(centroid_m)
         plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
-        ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, milliseconds, time_of_max, value)
-        return ret, annotated, value, plotting_parameters
-
+        #print(plotting_parameters)
+        #ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, milliseconds, time_of_max, value)
+        #outputs = (passiveLengthCalcFlag, self.dist_neutral, self.passive_deflection)
+        return value, plotting_parameters
+    def initializeTrackingWindow(self, img):
+        img.draw_rectangle(self.title_rect, color=10, fill=True)
+        return 0, img
+        
     def showTrackingOscilloscope(self, img, centroid_m, centroid_p, milliseconds, time_of_max, value):
         # Highlight the location of the magnet and post centroids
         # Show plot of value as a function of milliseconds
@@ -777,10 +798,10 @@ class PostAndMagnetTracker:
 
         # Block out title and oscilloscope areas
         img.draw_rectangle(self.title_rect, color=10, fill=True)
-        img.draw_rectangle(self.oscilloscope_rect, color=0, fill=True)
+        #img.draw_rectangle(self.oscilloscope_rect, color=0, fill=True)
 
         # Indicate the axes area
-        img.draw_rectangle(self.axes_rect, color=255, thickness=2)
+        #img.draw_rectangle(self.axes_rect, color=255, thickness=2)
 
         # Draw centroid in image
         ret = self.showTracking(img, centroid_m, centroid_p)
@@ -789,41 +810,41 @@ class PostAndMagnetTracker:
         if len(value) > 0:
             stretch = value[0]  # From computeStretchFrequency
             beat_freq = value[1]  # From computeStretchFrequency
-            signal_offset = self.maxTracker.signal_offset()
+            #signal_offset = self.maxTracker.signal_offset()
 
-            # Plot signal and beat freq in oscilloscope area
-            if len(beat_freq) > 0:
-                self.plot(img, self.axes_rect, milliseconds, stretch, 127, '-', 1, 0)
+            ## Plot signal and beat freq in oscilloscope area
+            #if len(beat_freq) > 0:
+                #self.plot(img, self.axes_rect, milliseconds, stretch, 127, '-', 1, 0)
 
-                # Show frequency as symbols
-                n = len(beat_freq)
-                ms = np.zeros((n+2,),dtype=np.float)
-                f  = np.zeros((n+2,),dtype=np.float)
-                f[0] = beat_freq[0]
-                ms[0] = milliseconds[0]
-                for i in range(0,n):
-                    f[i+1] = beat_freq[i]
-                    ms[i+1] = time_of_max[i]
+                ## Show frequency as symbols
+                #n = len(beat_freq)
+                #ms = np.zeros((n+2,),dtype=np.float)
+                #f  = np.zeros((n+2,),dtype=np.float)
+                #f[0] = beat_freq[0]
+                #ms[0] = milliseconds[0]
+                #for i in range(0,n):
+                    #f[i+1] = beat_freq[i]
+                    #ms[i+1] = time_of_max[i]
 
-                f[n+1] = beat_freq[-1]
-                ms[n+1] = milliseconds[-1]
+                #f[n+1] = beat_freq[-1]
+                #ms[n+1] = milliseconds[-1]
 
-               # print("f",f,"  ms=", ms, "milliseconds[-1]=", milliseconds[-1])
+               ## print("f",f,"  ms=", ms, "milliseconds[-1]=", milliseconds[-1])
 
-                self.plot(img, self.axes_rect, ms, f, 255, 'o', 1, 1)
-            else:
-                # Plot stretch in oscilloscope area
-                self.plot(img, self.axes_rect, milliseconds, stretch, 127, '-', 1, 0)
+                #self.plot(img, self.axes_rect, ms, f, 255, 'o', 1, 1)
+            #else:
+                ## Plot stretch in oscilloscope area
+                #self.plot(img, self.axes_rect, milliseconds, stretch, 127, '-', 1, 0)
 
             # Determine title
-            title = "Stretch: %.0f%%" % stretch[-1]
+            title = "Stretch: %.2f%%" % stretch[-1]
             if len(beat_freq) > 0:
-                title = title + ("\nBeat freq: %.1f Hz" % beat_freq[-1])
+                title = title + ("\nBeat freq: %.2f Hz" % beat_freq[-1])
 
             self.showTitle(img, title)
 
-            start = int(milliseconds[0])
-            self.showXTicks(img, (start, start + int(self.millisecs)), 255)
+            #start = int(milliseconds[0])
+            #self.showXTicks(img, (start, start + int(self.millisecs)), 255)
 
         #
         # rotated = img[rows][:, cols]
@@ -918,8 +939,12 @@ class PostAndMagnetTracker:
         #               1)
 
         # Draw centroid
-        img.draw_circle(int(centroid_m[0]), int(centroid_m[1]), 5, color=200, fill=True)  # marker
-        img.draw_circle(int(centroid_p[0]), int(centroid_p[1]), 10, color=127, fill=True)  # marker
+        #print(centroid_m)
+        #print(centroid_p)
+        if centroid_m != None:
+            img.draw_circle(int(centroid_m[0]), int(centroid_m[1]), 5, color=200, fill=True)  # marker
+        if centroid_p != None:
+            img.draw_circle(int(centroid_p[0]), int(centroid_p[1]), 10, color=127, fill=True)  # marker
 
         return 0
 
@@ -1331,6 +1356,7 @@ def locate_magnet(img, thresh_range, area_range, roi) -> ({}, {}):
 
     # Filter results by area
     stats_m = FilterByArea(stats_m, area_range[0])
+    #print(stats_m)
     # areas = GetAreas(stats_m)
     # if len(areas) > 0:
     #     print("  filtered magnet areas from %.0f to %.0f (n=%d)" % (min(areas), max(areas), len(areas)))
@@ -1342,7 +1368,7 @@ def locate_magnet(img, thresh_range, area_range, roi) -> ({}, {}):
     stats_m = FilterByAspectRatio(stats_m, 0.9)
 
     # Filter by extent (filter those below 0.6)
-    stats_m = FilterByExtent(stats_m, 0.5)
+    stats_m = FilterByExtent(stats_m, 0.6)
 
     # Order by Extent
     stats_m = OrderByExtent(stats_m)

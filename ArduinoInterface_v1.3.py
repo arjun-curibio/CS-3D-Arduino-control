@@ -55,7 +55,7 @@ class CS3D_GUI:
         self.EnableDisableButton.pack()
         
         self.textLabel = tk.Label(self.root, textvariable=self.SerialInput, fg='black')
-        self.textLabel.pack()
+        # self.textLabel.pack()
         self.close_button = tk.Button(self.root, text="Close", command=root.destroy)
         self.close_button.pack()
     
@@ -91,7 +91,7 @@ class CS3D_GUI:
         self.SerialInput.set(self.conn.readline().decode('utf-8')[:-2])
         # print(self.SerialInput.get())
         # print(self.SerialInput.get())
-        self.textLabel.update()
+        # self.textLabel.update()
         self.conn.flush()
 
         self.values = self.SerialInput.get().split(',')
