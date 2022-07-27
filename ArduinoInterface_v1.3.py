@@ -2,6 +2,8 @@ import tkinter as tk
 from serial import Serial, SerialException
 import serial.tools.list_ports
 import threading
+import numpy as np
+import matplotlib.pyplot as plt
 
 class CS3D_GUI:
     def __init__(self, root, conn):
@@ -9,6 +11,7 @@ class CS3D_GUI:
         root.title('Cytostretcher 3D')
 
         self.conn = conn
+        self.t = 0
         self.activeMotor = 1
         self.WellLocations = [0, 3875, 7775, 11700]
         self.motorFrames = []
@@ -20,9 +23,16 @@ class CS3D_GUI:
         self.dists = []
         self.motorEnable = [0,0,0,0]
         self.motorOverride = [0,0,0,0]
+        self.positionHistory = []
+        self.stretchHistory = []
+        self.stretch = 0
+        self.cameraUnderWell = 1
+        self.t_camera = 0
         self.SerialInput = tk.StringVar(self.root, value='1')
         self.output = tk.StringVar(self.root, value='')
         self.pos = tk.IntVar(self.root, 0)
+
+        self.saveDataFlag = False
 
         self.AdjUp  = tk.Button(self.root, text='-', command=lambda: self.sendAdj(0))
         self.AdjDown = tk.Button(self.root, text='+', command=lambda: self.sendAdj(1))
@@ -51,6 +61,7 @@ class CS3D_GUI:
             self.motorFrames[-1].pack()
             self.moveToButtons[-1].pack()
             self.positionLabels[-1].pack()
+    
         
         self.InitCamera = tk.Button(self.root, text='INIT Camera', command=self.INITCAMERA)
         self.InitCamera.pack()
@@ -58,25 +69,49 @@ class CS3D_GUI:
         self.Output.bind('<Return>', func=lambda val: self.sendOutput())
         self.Output.pack()
         self.EnableDisableButton = tk.Button(self.root, text="Enable/Disable Motor", command=self.EnableDisable)
+        self.ResetButton = tk.Button(self.root, text='Set Motor Position = 0', command=self.ResetMotor)
         # self.greet_button = tk.Button(self.root, text="Greet", command=self.greet)
-        self.EnableDisableButton.pack()
         
+        self.EnableDisableButton.pack()
+        self.ResetButton.pack()
         self.textLabel = tk.Label(self.root, textvariable=self.SerialInput, fg='black')
         # self.textLabel.pack()
         self.close_button = tk.Button(self.root, text="Close", command=root.destroy)
         self.close_button.pack()
-    
+        self.saveButton = tk.Button(self.root, text="Save Data", command=self.saveData)
+        self.saveButton.pack()
+
+    def saveData(self):
+        if self.saveDataFlag == False:
+            with open('samplefile.txt', 'w') as f:
+                f.write('{},{},{}\n'.format(0,0,0))
+            self.saveDataFlag = True
+        else:
+            self.saveDataFlag = False
+
+
     def INITCAMERA(self):
         string = 'INIT'
         self.conn.write((string+'\n').encode())
+    
+    def plot(self):
+        self.ax.clear()
+        self.ax.plot(self.positionHistory, self.stretchHistory)
+        pass
 
-
+    def ResetMotor(self):
+        string = 'R'+str(self.activeMotor)
+        self.conn.write((string+'\n').encode())
+        print(string)
+        self.pos.set(0)
+        self.Slider.update()
     def sendAdj(self, adj):
         string = 'A'+str(self.activeMotor)+','+str(adj)
         # self.pos = self.positions[self.activeMotor-1]
         # self.Slider.update()
         self.conn.write((string+'\n').encode())
         print(string)
+
     def sendPosition(self):
         string = 'O'+str(self.activeMotor)+','+str(self.pos.get())
         self.conn.write((string+'\n').encode())
@@ -110,17 +145,14 @@ class CS3D_GUI:
             self.t = self.values[1]
             print(self.t, end=': ')
             n_before_motors = 3
+            self.ImageProps = tuple(self.values[2].split('&'))
+            print(self.ImageProps)
+            self.t_camera, self.cameraUnderWell, self.stretch = self.ImageProps
             for i in range(n_before_motors,n_before_motors+4):
                 self.motorValues.append(self.values[i])
+                # print(self.motorValues[-1])
                 motorID, motorT, position, dist, freq, motorEnable, motorOverride = tuple(self.motorValues[-1].split('&'))
-                # print(motorID, end=',')
-                # print(motorT, end=',')
-                # print(position, end=',')
-                # print(dist, end=',')
-                # print(freq, end=',')
-                # print(motorEnable, end=',')
-                # print(motorOverride, end=',')
-                # print('//', end=' ')
+                
                 self.motorT[i-n_before_motors] = int(motorT)
                 self.positions[i-n_before_motors].set(position)
                 self.freqs[i-n_before_motors].set(freq)
@@ -128,16 +160,22 @@ class CS3D_GUI:
                 self.motorEnable[i-n_before_motors] = int(motorEnable)
                 self.motorOverride[i-n_before_motors] = int(motorOverride)
 
-                print("{0},{1}".format(self.motorT[i-n_before_motors], self.positions[i-n_before_motors].get()), end=' // ')
-                # self.positions[i-2].set(self.motorValues[-1].split('&')[2])
-                # self.frequencies[i-2].set()
+                # print("{0},{1}".format(self.motorT[i-n_before_motors], self.positions[i-n_before_motors].get()), end=' // ')
+                
                 self.positionLabels[i-n_before_motors].update()
                 # print(' // ', end=' ')
             # print(self.motorValues)
-            print(' ')
+            # print(' ')
         # print([self.positions[i].get() for i in range(4)])
-        self.root.after(1, self.update)
+        if self.saveDataFlag == True:
+            with open('samplefile.txt', 'a') as f:
+                f.write("{},{},{}\n".format(self.t, self.positions[0].get(), self.stretch))
         
+        # print("{}: {}".format(len(self.stretchHistory), self.stretchHistory))
+        # print("{}: {}".format(len(self.positionHistory), self.positionHistory))
+        self.root.after(1, self.update)
+    
+    
     def mainloop(self): # blocking
         self.root.mainloop()
 

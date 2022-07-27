@@ -380,7 +380,7 @@ class PostAndMagnetTracker:
         self.area_range = area_range
         self.roi_post = roi_post
         self.roi_magnet = roi_magnet
-        self.roi = roi
+        self.roi = (0,sensor.width(), 0, sensor.height())
 
         self.wait_until = 0
         self.millisecs = frames_to_plot / fps * 1000 # Max number of milliseconds to plot
@@ -694,7 +694,7 @@ class PostAndMagnetTracker:
                 # print('Automatic num_m=', len(stats_m), ' num_p=', len(stats_p),' roi=', self.roi)
                 self.thresh_range, self.area_range = determineThresholds(img, self.area_range, self.roi, self.roi_post, self.roi_magnet, visualize=True)
             self.automatic_thresh = False
-
+        #print('processing')
         # Return statistics for the magnet and post (if found)
         stats_m = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet)
         #if self.post_centroid is None:
@@ -790,7 +790,7 @@ class PostAndMagnetTracker:
         img.draw_rectangle(self.title_rect, color=10, fill=True)
         return 0, img
 
-    def showTrackingOscilloscope(self, img, centroid_m, centroid_p, milliseconds, time_of_max, value):
+    def showTrackingOscilloscope(self, img, centroid_m, centroid_p, milliseconds, time_of_max, value, current_well):
         # Highlight the location of the magnet and post centroids
         # Show plot of value as a function of milliseconds
         # maximums is the same length as value[1]
@@ -839,7 +839,21 @@ class PostAndMagnetTracker:
                 #self.plot(img, self.axes_rect, milliseconds, stretch, 127, '-', 1, 0)
 
             # Determine title
-            title = "Stretch: %.2f%%" % stretch[-1]
+            #print(current_well)
+            if current_well == 1:
+                well_row = 'A'
+            elif current_well == 2:
+                well_row = 'B'
+            elif current_well == 3:
+                well_row = 'C'
+            elif current_well == 4:
+                well_row = 'D'
+            else:
+                well_row = 'A'
+                
+            title = "Row {}".format(well_row)
+            title += "     {} s".format(round(milliseconds[-1]/1000,1))
+            title += "\nStretch: %4.2f%%" % stretch[-1]
             if len(beat_freq) > 0:
                 title = title + ("\nBeat freq: %.2f Hz" % beat_freq[-1])
 
@@ -1349,31 +1363,49 @@ def locate_magnet(img, thresh_range, area_range, roi) -> ({}, {}):
     # magnet detector (assume sensor is already grayscale)
     #
     # print("thresh_range=", thresh_range)
-    stats_m = img.find_blobs( [thresh_range[0]], pixels_threshold=area_range[0][0] )
+    stats_m = img.find_blobs( [thresh_range[0]], pixels_threshold=area_range[0][0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]))
     #print(stats_m)
-
+    if len(stats_m) == 0:
+        #print('Threshold')
+        return stats_m
+        
     # areas = GetAreas(stats_m)
     # if len(areas) > 0:
     #     print("unfiltered magnet areas from %.0f to %.0f" % (min(areas), max(areas)))
 
     # Filter results by area
     stats_m = FilterByArea(stats_m, area_range[0])
+    if len(stats_m) == 0:
+        #print('Area')
+        return stats_m
+        
     #print(stats_m)
     # areas = GetAreas(stats_m)
     # if len(areas) > 0:
     #     print("  filtered magnet areas from %.0f to %.0f (n=%d)" % (min(areas), max(areas), len(areas)))
 
     # Filter by ROI
-    stats_m = FilterByROI(stats_m, roi_x, roi_y)
-
+    #stats_m = FilterByROI(stats_m, roi_x, roi_y)
+    #if len(stats_m) == 0:
+        #print("{},{}, {}".format('ROI', roi_x, roi_y))
+        #return stats_m
+        
     # Filter by aspect ratio (expect tall approx 5:2 filter those below 0.9)
     stats_m = FilterByAspectRatio(stats_m, 0.9)
-
+    if len(stats_m) == 0:
+        #print('Aspect Ratio')
+        return stats_m
+        
     # Filter by extent (filter those below 0.6)
     stats_m = FilterByExtent(stats_m, 0.6)
-
+    if len(stats_m) == 0:
+        #print('Extent')
+        return stats_m
+        
     # Order by Extent
     stats_m = OrderByExtent(stats_m)
+    #print(len(stats_m))
+    #print(stats_m[0])
     return stats_m
 
 def locate_post(img, thresh_range, area_range, roi) -> ({}, {}):
@@ -1395,8 +1427,8 @@ def locate_post(img, thresh_range, area_range, roi) -> ({}, {}):
     #
     #print(thresh_range, end=' ')
     #print(area_range)
-    stats_p = img.find_blobs( [thresh_range[1]], pixels_threshold=area_range[1][0] )
-
+    stats_p = img.find_blobs( [thresh_range[1]], pixels_threshold=area_range[1][0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]))
+    
     got_one = len(stats_p) > 0
     # print("--- stats_p ---")
     # print(stats_p)
@@ -1418,13 +1450,18 @@ def locate_post(img, thresh_range, area_range, roi) -> ({}, {}):
     #     print("  post areas from %.0f to %.0f (n=%d)" % (min(areas), max(areas), len(areas)))
 
     # Filter by ROI
-    stats_p = FilterByROI(stats_p, roi_x, roi_y)
+    #stats_p = FilterByROI(stats_p, roi_x, roi_y)
 
 
     # if got_one and len(stats_p) == 0:
     #     print("  post filtered out by ROI ", roi)
     #     return stats_p
-
+    #for stat in stats_p:
+        #circularity = stat.roundness()
+        #aspect_ratio = stat.h() / stat.w()
+        #print('{},{} //'.format(circularity, aspect_ratio))
+        
+    #print(' ')
     # Filter by circularity
     stats_p = FilterByCircularity(stats_p, .4)
     # if got_one and len(stats_p) == 0:

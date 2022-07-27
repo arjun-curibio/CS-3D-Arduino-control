@@ -30,10 +30,10 @@ const int DIR[4]  = {18, 17, 16, 15};
 const int EN[4]   = { 6,  5,  4,  3};
 
 // MOTOR VARIABLES
-float                freqs[4] = { 0.25,  0.25,  0.25,  0.25};
+float                freqs[4] = { 1,  1,  1,  1};
 uint32_t            period[4] = {   0 ,    0 ,    0 ,     0};
-long                 dists[4] = {  500,   500,   500,   500};
-int MotorStartingPositions[4] = { 1000,  1000,  1000,  1000};
+long                 dists[4] = {  25,   25,   25,   25};
+int MotorStartingPositions[4] = { 800,  800,  800,  800};
 
 // MOTOR WAVEFORM VARIABLES
 uint32_t sections[5] =  {0,       40,       60,        75,      100};
@@ -336,7 +336,7 @@ void loop() {
     // CAMERA COMMANDS PASS THROUGH TO OPENMV 
     if (SerialInput.substring(0, 4) == "INIT") {
       // camera initialization routine
-      CameraUnderWell = SerialInput.substring(5,6).toInt();
+      //CameraUnderWell = SerialInput.substring(5,6).toInt();
       if (enableState[CameraUnderWell-1] == LOW) {
         MotorEnable(CameraUnderWell-1);
         // MAYBE: wait for motor to fully retract, without pausing other motors
@@ -433,14 +433,15 @@ if (Serial1.available() > 0) {
     //    val = Serial1.read
     mv = Serial1.readStringUntil('\n');
     Serial1.flush();
-    Serial.println(mv);
+    // Serial.println(mv);
     
     int index = mv.indexOf('&'); // find first &
     int magic = mv.substring(0, index).toInt(); // store first substring as magic number
     mv = mv.substring(index+1); // remove magic number
-    Serial.print(magic);
+    // Serial.print(magic);
     if (magic == -35){ // <t>&<stretch>&<max_stretch>&<current_well>\n
-      
+      // Serial.println(mv);
+
       index = mv.indexOf('&');
       t_camera = mv.substring(0, index).toFloat();
       mv = mv.substring(index+1);
@@ -457,6 +458,7 @@ if (Serial1.available() > 0) {
       CameraUnderWell = mv.substring(0, index).toInt();
       mv = mv.substring(index+1); // remove magic number
 
+      Serial.println(stretchValue);
     }
 
     if (magic == -43) { // <t>&<current_well>&<passive_length>&<magnet_thresh>&<post_threshold>&<centroid_post>\n
@@ -486,7 +488,7 @@ if (Serial1.available() > 0) {
       post_centroid[CameraUnderWell-1][1] = mv.substring(index2+1, index-1).toInt();
       mv = mv.substring(index+1); // remove magic number
     }
-    Serial.println(mv);
+    // Serial.println(mv);
     
   }
 
@@ -560,7 +562,7 @@ if (Serial1.available() > 0) {
 
   
   // TIMER UPDATE
-  if (timerSerial > 50 * 1000) {
+  if (timerSerial > 10 * 1000) {
 
     Serial.flush();
     Serial.print("-33");
@@ -572,8 +574,6 @@ if (Serial1.available() > 0) {
     Serial.print(CameraUnderWell);
     Serial.print('&');
     Serial.print(stretchValue);
-    Serial.print('&');
-    Serial.print(last_max_stretch);
     Serial.print(',');
     
     for (int st = 0; st < 4; st++) {
