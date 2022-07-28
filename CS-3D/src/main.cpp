@@ -14,6 +14,7 @@
 #define STEPCAMERA 19
 #define DIRCAMERA 14
 #define SLPCAMERA 2
+#define ENCAMERA 13
 
 // GLOBAL MOTOR CONSTANTS
 const int MS1Val = HIGH;
@@ -60,8 +61,8 @@ boolean enableState[4]    = { LOW,  LOW,  LOW,  LOW};
 // CAMERA VARIABLES
 int     CameraUnderWell     = 1;
 boolean MovingCamera        = LOW;
-int 	  CameraSpeed 		    = 2000;
-int     CameraPosition      = 150;
+int 	  CameraSpeed 		    = 3000;
+int     CameraPosition      = 0;
 boolean enableStateCamera   = LOW; // LOW to disable
 boolean ResetCameraFlag     = HIGH;
 char    rowLabel[4]         = {'A', 'B', 'C', 'D'};
@@ -73,6 +74,7 @@ elapsedMicros timerSerial;
 
 // COMMUNICATION VARIABLES
 String SerialInput;
+String printstring;
 String mv;
 boolean recievedHandshake = LOW;
 char serial1buffer[2000];
@@ -272,7 +274,7 @@ void setup() {
   stCamera.setCurrentPosition(0);
   ResetCameraFlag = LOW;
   pinMode(SLPCAMERA, OUTPUT); digitalWrite(SLPCAMERA, enableStateCamera);
-
+  pinMode (ENCAMERA, OUTPUT); digitalWrite(ENCAMERA, !enableStateCamera);
   // COMMUNICATION SET-UP
   Serial.begin(9600);
   Serial.setTimeout(0);
@@ -324,10 +326,16 @@ void setup() {
 	resetFlag[st] = HIGH;
   }
 }
+String partialReturn(char del) {
+  int index = mv.indexOf('&');
+  String val = mv.substring(0, index);
+  mv = mv.substring(index+1);
+  return val;
+}
 
 void loop() {
   // COMMUNICATION UPDATE
-  if (Serial.available() > 0) {
+  if (Serial.available() > 0) { // FROM COMPUTER
     SerialInput = Serial.readString();
     // Serial.println(SerialInput.substring(0, SerialInput.length() - 1));
     Serial.flush();
@@ -353,6 +361,29 @@ void loop() {
       Serial.println('#');
     }
 
+    else if (SerialInput.substring(0, 6) == "THRESH") {
+      // Serial1.print(CameraUnderWell);
+      // Serial1.print('&');
+      // Serial1.print("recieved");
+      // Serial.println('#');
+      // Serial1.println(CameraUnderWell + "&recieved");
+      String input1 = SerialInput;
+      SerialInput = SerialInput.substring(6);
+      int index = SerialInput.indexOf(',');
+      int lower = SerialInput.substring(0, index).toInt();
+      int upper = SerialInput.substring(index+1, SerialInput.length()-1).toInt();
+      // String printstring = CameraUnderWell + "&THRESH&" + lower + '&' + upper;
+      Serial1.print(CameraUnderWell);
+      Serial1.print('&');
+      Serial1.print("THRESH");
+      Serial1.print('&');
+      Serial1.print(lower);
+      Serial1.print('&');
+      Serial1.print(upper);
+      Serial.println('#');
+      // Serial1.println(printstring);
+      // Serial.println(input1+printstring);
+    }
     // MOTOR COMMANDS
     else if (SerialInput.substring(0, 1) == "M") { // enable/disable Motor
       int st = SerialInput.substring(1, 2).toInt() - 1;
@@ -414,6 +445,12 @@ void loop() {
       
       CameraMove(CameraPosition);
     }
+    else if (SerialInput.substring(0, 1) == "B") {
+      CameraSpeed = SerialInput.substring(1,SerialInput.length()-1).toInt();
+      stCamera.setMaxSpeed(CameraSpeed);
+      stCamera.setAcceleration(CameraSpeed);
+  
+    }
     else if (SerialInput.substring(0, 1) == "V") { // camera reset
       CameraReset();
 //      Serial.println("RESET");
@@ -429,7 +466,7 @@ void loop() {
     }
   }
 
-if (Serial1.available() > 0) {
+if (Serial1.available() > 0) { // FROM OPENMV
     //    val = Serial1.read
     mv = Serial1.readStringUntil('\n');
     Serial1.flush();
@@ -458,14 +495,19 @@ if (Serial1.available() > 0) {
       CameraUnderWell = mv.substring(0, index).toInt();
       mv = mv.substring(index+1); // remove magic number
 
-      Serial.println(stretchValue);
+      // Serial.println(stretchValue);
     }
 
     if (magic == -43) { // <t>&<current_well>&<passive_length>&<magnet_thresh>&<post_threshold>&<centroid_post>\n
       index = mv.indexOf('&');
+      t_camera = mv.substring(0, index).toFloat();
+      mv = mv.substring(index+1);
+
+      index = mv.indexOf('&');
       CameraUnderWell = mv.substring(0, index).toInt();
       mv = mv.substring(index+1);
 
+      
       index = mv.indexOf('&');
       passive_len[CameraUnderWell-1] = mv.substring(0, index).toInt();
       mv = mv.substring(index+1); // remove magic number
@@ -543,7 +585,7 @@ if (Serial1.available() > 0) {
 
   // CAMERA UPDATE
   if (stCamera.distanceToGo() != 0) {
-    enableStateCamera = HIGH; digitalWrite(SLPCAMERA, enableStateCamera);
+    enableStateCamera = HIGH; digitalWrite(ENCAMERA, !enableStateCamera); digitalWrite(SLPCAMERA, enableStateCamera);
     MovingCamera = HIGH;
     stCamera.run();
   }
@@ -554,7 +596,7 @@ if (Serial1.available() > 0) {
       stCamera.setCurrentPosition(0);
       CameraMove(CameraPosition);
     }
-    enableStateCamera = LOW; digitalWrite(SLPCAMERA, enableStateCamera);
+    enableStateCamera = LOW; digitalWrite(ENCAMERA, !enableStateCamera); digitalWrite(SLPCAMERA, enableStateCamera);
   }
   
 
@@ -601,6 +643,7 @@ if (Serial1.available() > 0) {
     Serial.print(digitalRead(10));
     Serial.print('&');
     Serial.print(stCamera.currentPosition());
+    Serial.print('&'+printstring);
     
     Serial.println(' ');
     timerSerial = 0;

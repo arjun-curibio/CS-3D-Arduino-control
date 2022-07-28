@@ -80,14 +80,20 @@ class CS3D_GUI:
         self.close_button.pack()
         self.saveButton = tk.Button(self.root, text="Save Data", command=self.saveData)
         self.saveButton.pack()
+        self.saveLabel = tk.Label(self.root, text='')
+        self.saveLabel.pack()
 
     def saveData(self):
         if self.saveDataFlag == False:
             with open('samplefile.txt', 'w') as f:
-                f.write('{},{},{}\n'.format(0,0,0))
+                f.write('{},{},{}\n'.format('T','motor','stretch'))
             self.saveDataFlag = True
+            self.saveLabel.configure(text='Saving')
+            self.saveLabel.update()
         else:
             self.saveDataFlag = False
+            self.saveLabel.configure(text='')
+            self.saveLabel.update()
 
 
     def INITCAMERA(self):
@@ -105,6 +111,8 @@ class CS3D_GUI:
         print(string)
         self.pos.set(0)
         self.Slider.update()
+
+
     def sendAdj(self, adj):
         string = 'A'+str(self.activeMotor)+','+str(adj)
         # self.pos = self.positions[self.activeMotor-1]
@@ -119,7 +127,7 @@ class CS3D_GUI:
 
     def sendOutput(self):
         self.conn.write((self.output.get()+'\n').encode())
-        print(self.output.get())
+        # print(self.output.get())
         self.output.set('')
         self.Output.update()
     
@@ -146,7 +154,7 @@ class CS3D_GUI:
             print(self.t, end=': ')
             n_before_motors = 3
             self.ImageProps = tuple(self.values[2].split('&'))
-            print(self.ImageProps)
+            # print(self.ImageProps)
             self.t_camera, self.cameraUnderWell, self.stretch = self.ImageProps
             for i in range(n_before_motors,n_before_motors+4):
                 self.motorValues.append(self.values[i])
@@ -173,6 +181,7 @@ class CS3D_GUI:
         
         # print("{}: {}".format(len(self.stretchHistory), self.stretchHistory))
         # print("{}: {}".format(len(self.positionHistory), self.positionHistory))
+        print(string)
         self.root.after(1, self.update)
     
     

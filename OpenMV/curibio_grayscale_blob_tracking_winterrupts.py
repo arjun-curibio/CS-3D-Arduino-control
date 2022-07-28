@@ -11,8 +11,8 @@ from pyb import Pin, LED, UART
 pin7 = Pin('P7', Pin.IN, Pin.PULL_UP)  # Connected to pin 7
 #green_led = LED(2)
 red_led   = LED(1)
-uart = UART(3, 9600, timeout = 10)
-uart.init(9600, timeout = 10)
+uart = UART(3, 9600, timeout = 25)
+uart.init(9600, timeout = 25)
 
 val = 0
 # Color Tracking Thresholds (Grayscale Min, Grayscale Max)
@@ -89,6 +89,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     initFlag = [False, False, False, False] # triggers high if need to init tracker
     isInit = [False, False, False, False]
     updatePostCentroid = False
+    updateMagnetThreshold = False
     #for i in range(0, nframes):
     while (True):
         inputs = (passiveLengthCalcFlag, passive_length[current_well-1], passive_deflection)
@@ -110,11 +111,11 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                 val = val.decode('utf-8')
                 print(val)
                 val = val.split('#')[0]
-                print(val)
+                #print(val)
                 val = str(val)
                 #print(val)
                 infos = val.split('&')
-                #print(infos)
+                print(infos)
                 print(infos[0])
                 current_well = int(infos[0])
                 if infos[1] == 'INIT':
@@ -128,6 +129,11 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                     # centroid_p_passive[current_well-1] = (int(infos[6]), int(infos[7]))
                 elif infos[1] == 'POST':
                     updatePostCentroid = True
+                elif infos[1] == 'THRESH':
+                    new_magnet_threshold = (int(infos[2]),int(infos[3]))
+                    updateMagnetThreshold = True
+                    
+                    
 
         #print(val)
         tic = utime.ticks_ms() - t0
@@ -214,6 +220,10 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
         # Paused?
 
         if isInit[current_well-1]:
+            if updateMagnetThreshold == True:
+                updateMagnetThreshold = False
+                tracker.thresh_range = (new_magnet_threshold, tracker.thresh_range[1])
+            
             value, plotting_parameters = tracker.processImage(img, tic, value, plotting_parameters, cb.PostAndMagnetTracker.computeStretch)
             #print(plotting_parameters)
             centroid_m[current_well-1], centroid_p[current_well-1], milliseconds, time_of_max, dummy = plotting_parameters
@@ -266,8 +276,8 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             #printstring += '&'
 
             #printstring = str(inputs+str(frame_rate))
-
-            print(printstring + str(frame_rate) + '#')
+            
+            print(printstring + str(tracker.thresh_range)+str(frame_rate) + '#')
             uart.write(printstring + '\n')
 
             toc = utime.ticks_ms() - t0
