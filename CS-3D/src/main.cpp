@@ -34,7 +34,7 @@ const int EN[4]   = { 6,  5,  4,  3};
 float                freqs[4] = { 1,  1,  1,  1};
 uint32_t            period[4] = {   0 ,    0 ,    0 ,     0};
 long                 dists[4] = {  25,   25,   25,   25};
-int MotorStartingPositions[4] = { 800,  800,  800,  800};
+int MotorStartingPositions[4] = { 500,  500,  500,  500};
 
 // MOTOR WAVEFORM VARIABLES
 uint32_t sections[5] =  {0,       40,       60,        75,      100};
@@ -61,7 +61,7 @@ boolean enableState[4]    = { LOW,  LOW,  LOW,  LOW};
 // CAMERA VARIABLES
 int     CameraUnderWell     = 1;
 boolean MovingCamera        = LOW;
-int 	  CameraSpeed 		    = 3000;
+int 	  CameraSpeed 		    = 2500;
 int     CameraPosition      = 0;
 boolean enableStateCamera   = LOW; // LOW to disable
 boolean ResetCameraFlag     = HIGH;
@@ -204,7 +204,7 @@ void CameraReset() {
   ResetCameraFlag = HIGH;
 //  enableStateCamera = HIGH;
 //  digitalWrite(SLPCAMERA, enableStateCamera);
-  CameraMove(-10000);
+  CameraMove(-23350);
 //  stCamera.setMaxSpeed(100000);
 }
 void StartingPositions(int MOTOR, int action) {
@@ -240,9 +240,11 @@ void setup() {
   for (int st = 0; st < 4; st++) {
     pinMode(EN[st], OUTPUT); digitalWrite(EN[st], enableState[st]);
 
+
     stArray[st] = new AccelStepper(1, STEP[st], DIR[st]);
     stArray[st]->setMaxSpeed(10000);
     stArray[st]->setAcceleration(100000);
+    stArray[st]->setPinsInverted(HIGH);
 
     period[st] = 1e6 / freqs[st];
     for (int ph = 0; ph < 5; ph++) {
@@ -427,22 +429,10 @@ void loop() {
       Serial1.print(CameraUnderWell);
       Serial1.print('&');
       Serial1.print("CHANGE");
-      Serial1.print('&');
-      Serial1.print(passive_len[CameraUnderWell-1]);
-      Serial1.print('&');
-      Serial1.print(mag_thresh[CameraUnderWell-1][0]);
-      Serial1.print('&');
-      Serial1.print(mag_thresh[CameraUnderWell-1][1]);
-      Serial1.print('&');
-      Serial1.print(post_thresh[CameraUnderWell-1][0]);
-      Serial1.print('&');
-      Serial1.print(post_thresh[CameraUnderWell-1][1]);
-      Serial1.print('&');
-      Serial1.print(post_centroid[CameraUnderWell-1][0]);
-      Serial1.print('&');
-      Serial1.print(post_centroid[CameraUnderWell-1][1]);
+      
       Serial.println('#');
       
+      CameraMove(CameraPosition);
       CameraMove(CameraPosition);
     }
     else if (SerialInput.substring(0, 1) == "B") {
@@ -491,9 +481,9 @@ if (Serial1.available() > 0) { // FROM OPENMV
       last_max_stretch = mv.substring(0, index).toFloat();
       mv = mv.substring(index+1); // remove magic number
       
-      index = mv.indexOf('&');
-      CameraUnderWell = mv.substring(0, index).toInt();
-      mv = mv.substring(index+1); // remove magic number
+      // index = mv.indexOf('&');
+      // CameraUnderWell = mv.substring(0, index).toInt();
+      // mv = mv.substring(index+1); // remove magic number
 
       // Serial.println(stretchValue);
     }
@@ -593,8 +583,9 @@ if (Serial1.available() > 0) { // FROM OPENMV
     MovingCamera = LOW;
     if (ResetCameraFlag == HIGH) {
       ResetCameraFlag = LOW;
-      stCamera.setCurrentPosition(0);
-      CameraMove(CameraPosition);
+      stCamera.setCurrentPosition(-3250);
+      CameraMove(0);
+      // CameraUnderWell = 1;
     }
     enableStateCamera = LOW; digitalWrite(ENCAMERA, !enableStateCamera); digitalWrite(SLPCAMERA, enableStateCamera);
   }
@@ -604,7 +595,7 @@ if (Serial1.available() > 0) { // FROM OPENMV
 
   
   // TIMER UPDATE
-  if (timerSerial > 10 * 1000) {
+  if (timerSerial > 50 * 1000) {
 
     Serial.flush();
     Serial.print("-33");

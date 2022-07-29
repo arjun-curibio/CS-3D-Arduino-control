@@ -425,6 +425,8 @@ class PostAndMagnetTracker:
 
     # This should be private
     def initPassive(self, img, stats_m, stats_p):
+        if stats_m == None or stats_p == None:
+            return (0,0), (0,0)
         title_height = 80
         left_padding = 120
         right_padding = 120
@@ -785,6 +787,13 @@ class PostAndMagnetTracker:
         #print(plotting_parameters)
         #ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, milliseconds, time_of_max, value)
         #outputs = (passiveLengthCalcFlag, self.dist_neutral, self.passive_deflection)
+        for stat in stats_p:
+            x,y,r = stat.enclosing_circle()
+            
+            img.draw_circle(x,y,r,color=(0,255,0), thickness=2)
+            
+            x,y,w,h = stat.rect()
+            img.draw_rectangle(x,y,w,h,color=(255,255,0), thickness=4)
         return value, plotting_parameters
     def initializeTrackingWindow(self, img):
         img.draw_rectangle(self.title_rect, color=10, fill=True)
@@ -1025,7 +1034,7 @@ def determineThresholds(img, area_range, roi, roi_post, roi_magnet, visualize=Fa
     print("======== determineThresholds =========")
     print("visualize = ", visualize)
     # Within reasonable range search for magnet and post
-    r = range(0, 65)
+    r = range(0, 150)
     data = []
     for i in r:
         thresholds = ((0, i), (0, i))
@@ -1363,6 +1372,8 @@ def locate_magnet(img, thresh_range, area_range, roi) -> ({}, {}):
     # magnet detector (assume sensor is already grayscale)
     #
     # print("thresh_range=", thresh_range)
+    if thresh_range[0] == None:
+        return None
     stats_m = img.find_blobs( [thresh_range[0]], pixels_threshold=area_range[0][0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]))
     #print(stats_m)
     if len(stats_m) == 0:
@@ -1441,6 +1452,7 @@ def locate_post(img, thresh_range, area_range, roi) -> ({}, {}):
 
     # Filter results by area
     stats_p = FilterByArea(stats_p, area_range[1])
+    
     # if got_one and len(stats_p) == 0:
     #     print("  post filtered out by area")
     #     return stats_p
@@ -1463,13 +1475,20 @@ def locate_post(img, thresh_range, area_range, roi) -> ({}, {}):
         
     #print(' ')
     # Filter by circularity
+    
     stats_p = FilterByCircularity(stats_p, .4)
+    for stat in stats_p:
+        circularity = stat.roundness()
+        aspect_ratio = stat.h() / stat.w()
+        print('{},{} //'.format(circularity, aspect_ratio))
     # if got_one and len(stats_p) == 0:
     #     print(" post filtered out by circularity")
     #     return stats_p
 
     # Order by Circularity
     stats_p = OrderByCircularity(stats_p)
+    #for stat in stats_p:
+        #img.draw_rectangle(stat.rect(), color=(0,255,0))
     #print(stats_p)
 
     return stats_p

@@ -9,8 +9,12 @@ import utime
 from pyb import Pin, LED, UART
 
 pin7 = Pin('P7', Pin.IN, Pin.PULL_UP)  # Connected to pin 7
-#green_led = LED(2)
+green_led = LED(2)
 red_led   = LED(1)
+#LED(1).on()
+#LED(2).on()
+LED(3).on()
+
 uart = UART(3, 9600, timeout = 25)
 uart.init(9600, timeout = 25)
 
@@ -32,11 +36,11 @@ def magnet_post_cb(blob) -> bool:
     return True
 
 magnet_thresh_init = (0,40)
-post_thresh_init = (0,17)
+post_thresh_init = (0,10)
 def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                                centroid_post=(259, 213),
                                thresh_range=(magnet_thresh_init, post_thresh_init),
-                               area_range=((1000, 5000), (3000, 20000)),
+                               area_range=((1000, 3000), (3000, 10000)),
                                outfile=None):
     sensor.reset()
     sensor.set_pixformat(sensor.GRAYSCALE)
@@ -195,31 +199,8 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
 
             continue
         
-        #print(on)
-        
-        #if on and running and tic > 500:
-            ##green_led.off()
-            #red_led.on()
-            #t0 = utime.ticks_ms()  # Debounce (reset)
-            #print("----- Pause Processing -----")
-            #running = False
-            #continue
-
-        ## Restart processing
-        #elif on and not running and tic > 500:
-            ##green_led.off()
-            #red_led.off()
-            #tracker = cb.PostAndMagnetTracker(fps, nframes, thresh_range, area_range, roi_post = ROI_post, roi_magnet = ROI_magnet)
-            #print("\n---- Reset and go again ----")
-            #print("\nmilliseconds\tstretch_percent\tbeat_freq\tlast_max_stretch\tfps")  # tab-delimited header
-            #frame_rate = 0
-            #t0 = utime.ticks_ms()
-            #running = True
-            #continue
-
-        # Paused?
-
         if isInit[current_well-1]:
+            tracker.thresh_range = (magnet_thresh[current_well-1], post_thresh[current_well-1])
             if updateMagnetThreshold == True:
                 updateMagnetThreshold = False
                 tracker.thresh_range = (new_magnet_threshold, tracker.thresh_range[1])
@@ -265,7 +246,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                 freq = 'Error'
                 max_stretch = 'Error'
                 
-            printstring = "-35&{}&{}&{}".format(round(tic/1000,3), round(stretch,1),current_well)
+            printstring = "-35&{}&{}&{}".format(round(tic/1000,3), round(stretch,3),current_well)
             #printstring = "-35"
             #printstring += '&'
             #printstring += "{}".format(round(tic/1000,1))
@@ -277,7 +258,8 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
 
             #printstring = str(inputs+str(frame_rate))
             
-            print(printstring + str(tracker.thresh_range)+str(frame_rate) + '#')
+            print(printstring + str(tracker.thresh_range)+'&'+str(initFlag[current_well-1])+'&'+str(isInit[current_well-1])+'&'+str(frame_rate) + '#')
+            
             uart.write(printstring + '\n')
 
             toc = utime.ticks_ms() - t0
@@ -291,7 +273,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
         if (toc > tic):
             frame_rate = 1000.0/(toc-tic)
             tracker.setFps(frame_rate)  # Used to compute beat_frequency
-            print("Nothing happened, {}, {}, {}".format(frame_rate, initFlag, isInit))
+            print("Nothing happened, {}, {}, {}, {}".format(frame_rate, initFlag, isInit, current_well))
 
 
 
