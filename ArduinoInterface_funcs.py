@@ -65,7 +65,9 @@ class CS3D_GUI:
                 string = 'C'+str(motor+1)+','+str(self.WellLocations[motor])
                 self.writeToSerial((string+'\n'))
                 # self.conn.write((string+'\n').encode())
+                self.motorFrames[int(self.cameraUnderWell)-1].configure(borderwidth=2)
                 self.cameraUnderWell = motor + 1
+                self.motorFrames[int(self.cameraUnderWell)-1].configure(borderwidth=7)
             
             self.moveToButtons[-1].configure(command=moveTo)
             
@@ -179,12 +181,13 @@ class CS3D_GUI:
                 n_before_motors = 3
                 self.t_camera, self.cameraUnderWell, self.stretch = tuple(self.values[2].split('&'))
                 # print(self.ImageProps)
+                self.cameraUnderWell = int(self.cameraUnderWell)
 
                 for i in range(n_before_motors,n_before_motors+4):
-                    if i == int(self.cameraUnderWell)+n_before_motors-1:
-                        self.motorFrames[i-n_before_motors].configure(borderwidth=7)
-                    else:
-                        self.motorFrames[i-n_before_motors].configure(borderwidth=2)
+                    # if i == int(self.cameraUnderWell)+n_before_motors-1:
+                    #     self.motorFrames[i-n_before_motors].configure(borderwidth=7)
+                    # else:
+                    #     self.motorFrames[i-n_before_motors].configure(borderwidth=2)
                     self.motorValues.append(self.values[i])
                     # print(self.motorValues[-1])
                     motorID, motorT, position, dist, freq, motorEnable, motorOverride = tuple(self.motorValues[-1].split('&'))
@@ -211,6 +214,8 @@ class CS3D_GUI:
                     # print(' // ', end=' ')
                 # print(self.motorValues)
                 # print(' ')
+                self.cameraVals = self.values[-1].split('&')
+                
             # print([self.positions[i].get() for i in range(4)])
             if self.saveDataFlag == True:
                 with open('samplefile.txt', 'a') as f:
@@ -219,7 +224,7 @@ class CS3D_GUI:
             # print("{}: {}".format(len(self.stretchHistory), self.stretchHistory))
             # print("{}: {}".format(len(self.positionHistory), self.positionHistory))
             # print(string)
-            print(self.cameraUnderWell)
+            print(self.values)
         self.root.after(1, self.update)
     
     
