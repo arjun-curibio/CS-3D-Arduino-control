@@ -3,11 +3,14 @@ import tkinter as tk
 import threading
 
 class CS3D_GUI:
-    def __init__(self, root, conn=None):
+    def __init__(self, root, ser=None):
         self.root = root
+        self.root.configure(background='white')
         root.title('Cytostretcher 3D')
 
-        self.conn = conn
+        self.ser = ser
+        if self.ser != None:
+            self.conn = ser.conn
         self.t = 0
         self.activeMotor = 1
         # self.WellLocations = [0, 3875, 7775, 11700]
@@ -21,8 +24,8 @@ class CS3D_GUI:
         self.freqLabel = []
         self.dists = []
         self.distLabel = []
-        self.motorEnable = [0,0,0,0]
-        self.motorOverride = [0,0,0,0]
+        self.enable = []
+        self.enableLabel = []
         self.positionHistory = []
         self.stretchHistory = []
         self.stretch = 0
@@ -37,17 +40,17 @@ class CS3D_GUI:
         self.AdjUp  = tk.Button(self.root, text='-', command=lambda: self.sendAdj(0))
         self.AdjDown = tk.Button(self.root, text='+', command=lambda: self.sendAdj(1))
         self.Slider = tk.Scale(self.root, from_=-500, to=500, variable=self.pos, length=100, command=lambda val: self.sendPosition())
-        self.Slider.pack(side=tk.RIGHT)
+        self.Slider.place(relwidth=0.075, relheight=0.9, relx=0.8, rely=0.05)
         self.AdjUp.pack(side=tk.RIGHT)
         self.AdjDown.pack(side=tk.RIGHT)
         
         for i in range(4):
-            self.motorFrames.append(tk.Frame(self.root, background='white', borderwidth=2, relief='ridge', width=500, height=100))
+            self.motorFrames.append(tk.Frame(self.root, background='white', borderwidth=2, relief='groove', width=500, height=100))
             
             self.positions.append(tk.StringVar(self.motorFrames[-1], value='Position: 0 steps'))
             self.positionLabels.append(tk.Label(self.motorFrames[-1], background='white', foreground='black', textvariable=self.positions[-1]))
             
-            self.moveToButtons.append(tk.Button(self.motorFrames[-1], text='Move Camera to Well '+str(i+1)))
+            self.moveToButtons.append(tk.Button(self.motorFrames[-1], text='Move Camera \nto Well '+str(i+1)))
             
             self.dists.append(tk.StringVar(self.motorFrames[-1], value='Distance: 20 steps'))
             self.distLabel.append(tk.Label(self.motorFrames[-1], textvariable=self.dists[i], foreground='black', background='white'))
@@ -55,31 +58,32 @@ class CS3D_GUI:
             self.freqs.append(tk.StringVar(self.motorFrames[-1], value='Frequency: 1 Hz'))
             self.freqLabel.append(tk.Label(self.motorFrames[-1], textvariable=self.freqs[i], foreground='black', background='white'))
             
+            self.enable.append(tk.StringVar(self.motorFrames[-1], value='Disabled'))
+            self.enableLabel.append(tk.Label(self.motorFrames[-1], textvariable=self.enable[i], foreground='black', background='white'))
+            
             def moveTo(motor=i):
                 string = 'C'+str(motor+1)+','+str(self.WellLocations[motor])
                 self.writeToSerial((string+'\n'))
                 # self.conn.write((string+'\n').encode())
                 self.cameraUnderWell = motor + 1
-                print(string)
             
             self.moveToButtons[-1].configure(command=moveTo)
             
-            
-            
-            self.motorFrames[-1].place(bordermode=tk.OUTSIDE, relheight=0.2, relwidth=0.8, relx=0, rely=i*0.2)
-            self.moveToButtons[-1].place(relwidth=0.3, relheight=0.15, relx=0.7, rely=0.1)
-            self.positionLabels[-1].pack()
-            self.freqLabel[-1].pack()
-            self.distLabel[-1].pack()
+            self.motorFrames[-1].place(bordermode=tk.OUTSIDE, relheight=0.2, relwidth=0.4, relx=0, rely=i*0.2)
+            self.moveToButtons[-1].place(relwidth=0.3, relheight=0.5, relx=0.7, rely=0.1)
+            self.positionLabels[-1].place(relx=0.1, rely=0)
+            self.freqLabel[-1].place(relx=0.1, rely=0.2)
+            self.distLabel[-1].place(relx=0.1, rely=0.4)
+            self.enableLabel[-1].place(relx=0.1, rely=0.6)
     
         
         self.InitCamera = tk.Button(self.root, text='INIT Camera', command=self.INITCAMERA)
-        self.InitCamera.pack()
+        self.InitCamera.place(relx=0.5, rely=0.8)
         self.Output = tk.Entry(self.root, textvariable=self.output)
         self.Output.bind('<Return>', func=lambda val: self.sendOutput())
         self.Output.pack()
         self.EnableDisableButton = tk.Button(self.root, text="Enable/Disable Motor", command=self.EnableDisable)
-        self.ResetButton = tk.Button(self.root, text='Set Motor Position = 0', command=self.ResetMotor)
+        self.ResetButton = tk.Button(self.root, text='Set Motor Starting Position', command=self.ResetMotor)
         # self.greet_button = tk.Button(self.root, text="Greet", command=self.greet)
         
         self.EnableDisableButton.pack()
@@ -95,8 +99,9 @@ class CS3D_GUI:
         self.saveLabel.pack()
 
     def writeToSerial(self, string):
-        if self.conn != None:
+        if self.ser != None:
             self.conn.write(string.encode())
+        print(string)
         
     def saveData(self):
         if self.saveDataFlag == False:
@@ -123,7 +128,6 @@ class CS3D_GUI:
     def ResetMotor(self):
         string = 'R'+str(self.cameraUnderWell)
         self.writeToSerial(string+'\n')
-        print(string)
         self.pos.set(0)
         self.Slider.update()
 
@@ -158,49 +162,64 @@ class CS3D_GUI:
         print(string)
 
     def update(self):
-        if self.conn != None:
+        if self.ser == None:
+            string = '1'
+        else:
             string = self.conn.readline().decode('utf-8')[:-2]
             self.conn.flush()
-        else:
-            string = ''
-        
-        
-        self.values = string.split(',')
-        self.motorValues = []
-        # print(self.values)
-        if self.values[0] == '-33':   
-            self.t = self.values[1]
-            print(self.t, end=': ')
-            n_before_motors = 3
-            self.t_camera, self.cameraUnderWell, self.stretch = tuple(self.values[2].split('&'))
-            # print(self.ImageProps)
+            
+            self.values = string.split(',')
+            self.motorValues = []
+            # print(self.values)
+            if self.values[0] == 'HELPER':
+                pass
+            elif self.values[0] == '-33':   
+                self.t = self.values[1]
+                print(self.t, end=': ')
+                n_before_motors = 3
+                self.t_camera, self.cameraUnderWell, self.stretch = tuple(self.values[2].split('&'))
+                # print(self.ImageProps)
 
-            for i in range(n_before_motors,n_before_motors+4):
-                self.motorValues.append(self.values[i])
-                # print(self.motorValues[-1])
-                motorID, motorT, position, dist, freq, motorEnable, motorOverride = tuple(self.motorValues[-1].split('&'))
-                
-                self.motorT[i-n_before_motors] = int(motorT)
-                self.positions[i-n_before_motors].set('Position: '+position+' steps')
-                self.freqs[i-n_before_motors].set('Frequency: '+freq+' Hz')
-                self.dists[i-n_before_motors].set('Distance: '+dist+' steps')
-                self.motorEnable[i-n_before_motors] = int(motorEnable)
-                self.motorOverride[i-n_before_motors] = int(motorOverride)
-
-                # print("{0},{1}".format(self.motorT[i-n_before_motors], self.positions[i-n_before_motors].get()), end=' // ')
-                
-                self.positionLabels[i-n_before_motors].update()
-                # print(' // ', end=' ')
-            # print(self.motorValues)
-            # print(' ')
-        # print([self.positions[i].get() for i in range(4)])
-        if self.saveDataFlag == True:
-            with open('samplefile.txt', 'a') as f:
-                f.write("{},{},{}\n".format(self.t, self.positions[int(self.cameraUnderWell)-1].get()[10:-5], self.stretch))
-        
-        # print("{}: {}".format(len(self.stretchHistory), self.stretchHistory))
-        # print("{}: {}".format(len(self.positionHistory), self.positionHistory))
-        print(string)
+                for i in range(n_before_motors,n_before_motors+4):
+                    if i == int(self.cameraUnderWell)+n_before_motors-1:
+                        self.motorFrames[i-n_before_motors].configure(borderwidth=7)
+                    else:
+                        self.motorFrames[i-n_before_motors].configure(borderwidth=2)
+                    self.motorValues.append(self.values[i])
+                    # print(self.motorValues[-1])
+                    motorID, motorT, position, dist, freq, motorEnable, motorOverride = tuple(self.motorValues[-1].split('&'))
+                    
+                    self.motorT[i-n_before_motors] = int(motorT)
+                    self.positions[i-n_before_motors].set('Current position: '+position+' steps')
+                    self.freqs[i-n_before_motors].set('Frequency: '+freq+' Hz')
+                    self.dists[i-n_before_motors].set('Distance: '+dist+' steps')
+                    if int(motorEnable) == 1: # disabled
+                        self.enable[i-n_before_motors].set('Disabled')
+                        self.enableLabel[i-n_before_motors].configure(foreground='black')
+                    else: # enabled
+                        self.enable[i-n_before_motors].set('Enabled')
+                        self.enableLabel[i-n_before_motors].configure(foreground='red')
+                    
+                    if int(motorOverride) == 1:
+                        self.enable[i-n_before_motors].set('Moving Manually')
+                        self.enableLabel[i-n_before_motors].configure(foreground='green')
+                    
+                    
+                    # print("{0},{1}".format(self.motorT[i-n_before_motors], self.positions[i-n_before_motors].get()), end=' // ')
+                    
+                    self.positionLabels[i-n_before_motors].update()
+                    # print(' // ', end=' ')
+                # print(self.motorValues)
+                # print(' ')
+            # print([self.positions[i].get() for i in range(4)])
+            if self.saveDataFlag == True:
+                with open('samplefile.txt', 'a') as f:
+                    f.write("{},{},{}\n".format(self.t, self.positions[int(self.cameraUnderWell)-1].get()[10:-5], self.stretch))
+            
+            # print("{}: {}".format(len(self.stretchHistory), self.stretchHistory))
+            # print("{}: {}".format(len(self.positionHistory), self.positionHistory))
+            # print(string)
+            print(self.cameraUnderWell)
         self.root.after(1, self.update)
     
     

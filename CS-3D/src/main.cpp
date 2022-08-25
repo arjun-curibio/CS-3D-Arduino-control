@@ -16,6 +16,8 @@
 #define SLPCAMERA 2
 #define ENCAMERA 13
 
+// Serial definition (for readability)
+#define OMV Serial1
 // GLOBAL MOTOR CONSTANTS
 const int MS1Val = HIGH;
 const int MS2Val = HIGH;
@@ -73,7 +75,7 @@ elapsedMicros timers[4];
 elapsedMicros timerSerial;
 
 // COMMUNICATION VARIABLES
-String SerialInput;
+String command;
 String printstring;
 String mv;
 boolean recievedHandshake = LOW;
@@ -89,7 +91,10 @@ int passive_len[4] = {100,100,100,100};
 int mag_thresh[4][2] = {{20,40}, {20,40}, {20,40}, {20,40}};
 int post_thresh[4][2] = { {0, 15}, {0, 15}, {0, 15}, {0, 15}};
 int post_centroid[4][2] = { {0,0}, {0,0}, {0,0}, {0,0}};
-
+boolean HELPERFLAG = LOW;
+String HELPERMASK = "None";
+int32_t valueArray[50];
+int k=0;
 AccelStepper *stArray[4];
 AccelStepper stCamera(1, STEPCAMERA, DIRCAMERA);
 int checkPhase(elapsedMicros t, uint32_t ts[]) {
@@ -281,10 +286,10 @@ void setup() {
   Serial.begin(9600);
   Serial.setTimeout(0);
   
-  Serial1.begin(9600); // RX: 0, TX: 1
-  // Serial1.setTimeout(0);
+  OMV.begin(9600); // RX: 0, TX: 1
+  // OMV.setTimeout(0);
   sizeOfSerialBuffer = sizeof(serial1buffer);
-  Serial1.addMemoryForRead(serial1buffer, sizeOfSerialBuffer);
+  OMV.addMemoryForRead(serial1buffer, sizeOfSerialBuffer);
 
   establishConnection();
 
@@ -338,128 +343,191 @@ String partialReturn(char del) {
 void loop() {
   // COMMUNICATION UPDATE
   if (Serial.available() > 0) { // FROM COMPUTER
-    SerialInput = Serial.readString();
-    // Serial.println(SerialInput.substring(0, SerialInput.length() - 1));
+    command = Serial.readString();
+    // Serial.println(command.substring(0, command.length() - 1));
     Serial.flush();
 
 
     // CAMERA COMMANDS PASS THROUGH TO OPENMV 
-    if (SerialInput.substring(0, 4) == "INIT") {
+    if (command.substring(0, 4) == "INIT") {
       // camera initialization routine
-      //CameraUnderWell = SerialInput.substring(5,6).toInt();
+      //CameraUnderWell = command.substring(5,6).toInt();
       if (enableState[CameraUnderWell-1] == LOW) {
         MotorEnable(CameraUnderWell-1);
         // MAYBE: wait for motor to fully retract, without pausing other motors
       }
-      Serial1.print(CameraUnderWell);
-      Serial1.print('&');
-      Serial1.print("INIT");
+      OMV.print(CameraUnderWell);
+      OMV.print('&');
+      OMV.print("INIT");
       Serial.println('#');
     }
-    else if (SerialInput.substring(0, 4) == "POST") {
-      Serial1.print(CameraUnderWell);
-      Serial1.print('&');
-      Serial1.print("POST");
+    else if (command.substring(0, 4) == "POST") {
+      OMV.print(CameraUnderWell);
+      OMV.print('&');
+      OMV.print("POST");
       Serial.println('#');
     }
 
-    else if (SerialInput.substring(0, 6) == "THRESH") {
-      // Serial1.print(CameraUnderWell);
-      // Serial1.print('&');
-      // Serial1.print("recieved");
+    else if (command.substring(0, 6) == "THRESH") {
+      // OMV.print(CameraUnderWell);
+      // OMV.print('&');
+      // OMV.print("recieved");
       // Serial.println('#');
-      // Serial1.println(CameraUnderWell + "&recieved");
-      String input1 = SerialInput;
-      SerialInput = SerialInput.substring(6);
-      int index = SerialInput.indexOf(',');
-      int lower = SerialInput.substring(0, index).toInt();
-      int upper = SerialInput.substring(index+1, SerialInput.length()-1).toInt();
+      // OMV.println(CameraUnderWell + "&recieved");
+      String input1 = command;
+      command = command.substring(6);
+      int index = command.indexOf(',');
+      int lower = command.substring(0, index).toInt();
+      int upper = command.substring(index+1, command.length()-1).toInt();
       // String printstring = CameraUnderWell + "&THRESH&" + lower + '&' + upper;
-      Serial1.print(CameraUnderWell);
-      Serial1.print('&');
-      Serial1.print("THRESH");
-      Serial1.print('&');
-      Serial1.print(lower);
-      Serial1.print('&');
-      Serial1.print(upper);
+      OMV.print(CameraUnderWell);
+      OMV.print('&');
+      OMV.print("THRESH");
+      OMV.print('&');
+      OMV.print(lower);
+      OMV.print('&');
+      OMV.print(upper);
       Serial.println('#');
-      // Serial1.println(printstring);
+      // OMV.println(printstring);
       // Serial.println(input1+printstring);
     }
+    else if (command.substring(0, 12) == "HELPERTOGGLE") {
+      HELPERFLAG = !HELPERFLAG;
+      OMV.print(CameraUnderWell);
+      OMV.print("&HELPERTOGGLE&");
+      OMV.print(HELPERFLAG);
+      OMV.println('#');
+
+      Serial.println("Toggled Helper.");
+
+    }
+    else if (command.substring(0, 10) == "HELPERMASK") {
+      String mask = command.substring(11, command.length()-1);
+      if (HELPERMASK == mask) {
+        HELPERMASK = "None";
+      }
+      else {
+        HELPERMASK = mask;
+      }
+      
+      OMV.print(CameraUnderWell);
+      OMV.print("&HELPERMASK&");
+      OMV.print(HELPERMASK);
+      OMV.println('#');
+    }
+    else if (command.substring(0, 6) == "HELPER") {
+      command = command.substring(6);
+      Serial.println(command);
+      
+      int i=0, del=0;
+
+      for (int idx = 0; idx < 50; idx++){
+          valueArray[idx] = -55; // reset default to -55
+      }
+      k = 0;
+      while (del != -1) {
+        // Serial.println("in parsing loop");
+        del = command.indexOf(',');
+        valueArray[i] = command.substring(0,del).toInt();
+        command = command.substring(del+1);
+        k=k+1;
+        i = i + 1;
+      }
+      // for( int idx = 0; idx < 50; idx++) {
+      //   Serial.print(valueArray[idx]);
+      //   Serial.print(',');
+      // }
+      // Serial.println(' ');
+      OMV.print(CameraUnderWell);
+      OMV.print("&HELPER");
+
+      Serial.print(CameraUnderWell);
+      Serial.print("&HELPER");
+      for (int idx = 0; idx < k; idx++) {
+        OMV.print('&');
+        OMV.print(valueArray[idx]);
+        Serial.print('&');
+        Serial.print(valueArray[idx]);
+        
+      }
+      OMV.println('#');
+      Serial.println('#');
+
+    }
     // MOTOR COMMANDS
-    else if (SerialInput.substring(0, 1) == "M") { // enable/disable Motor
-      int st = SerialInput.substring(1, 2).toInt() - 1;
+    else if (command.substring(0, 1) == "M") { // enable/disable Motor
+      int st = command.substring(1, 2).toInt() - 1;
       MotorEnable(st);
     }
-    else if (SerialInput.substring(0, 1) == "D") { // change motor Distance
-      int st = SerialInput.substring(1, 2).toInt() - 1;
-      float d = SerialInput.substring(3, SerialInput.length() - 1).toFloat();
+    else if (command.substring(0, 1) == "D") { // change motor Distance
+      int st = command.substring(1, 2).toInt() - 1;
+      float d = command.substring(3, command.length() - 1).toFloat();
       MotorDistance(st, d);
     }
-    else if (SerialInput.substring(0, 1) == "F") { // change motor Frequency
-      int st = SerialInput.substring(1, 2).toInt() - 1;
-      float f = SerialInput.substring(3, SerialInput.length() - 1).toFloat();
+    else if (command.substring(0, 1) == "F") { // change motor Frequency
+      int st = command.substring(1, 2).toInt() - 1;
+      float f = command.substring(3, command.length() - 1).toFloat();
       MotorFrequency(st, f);
     }
-    else if (SerialInput.substring(0, 1) == "O") { // position Override
-      int st = SerialInput.substring(1, 2).toInt() - 1;
-      int m = SerialInput.substring(3, SerialInput.length() - 1).toInt();
+    else if (command.substring(0, 1) == "O") { // position Override
+      int st = command.substring(1, 2).toInt() - 1;
+      int m = command.substring(3, command.length() - 1).toInt();
       MotorManual(st, m);
     }
-    else if (SerialInput.substring(0, 1) == "R") { // Reset
-      int st = SerialInput.substring(1,2).toInt() - 1;
+    else if (command.substring(0, 1) == "R") { // Reset
+      int st = command.substring(1,2).toInt() - 1;
       MotorResetPosition(st);
     }
-    else if (SerialInput.substring(0, 1) == "S") { // waveform Shape
-      uint32_t RIS = SerialInput.substring(1,3).toInt();
-      uint32_t HOL = SerialInput.substring(4,6).toInt();
-      uint32_t FAL = SerialInput.substring(7,SerialInput.length() - 1).toInt();
+    else if (command.substring(0, 1) == "S") { // waveform Shape
+      uint32_t RIS = command.substring(1,3).toInt();
+      uint32_t HOL = command.substring(4,6).toInt();
+      uint32_t FAL = command.substring(7,command.length() - 1).toInt();
       WaveformUpdate(RIS, HOL, FAL);
     }
-    else if (SerialInput.substring(0, 1) == "A") { // motor Adjustment
-      int st = SerialInput.substring(1, 2).toInt() - 1;
-      int ADJ = SerialInput.substring(3, SerialInput.length() - 1).toInt();
+    else if (command.substring(0, 1) == "A") { // motor Adjustment
+      int st = command.substring(1, 2).toInt() - 1;
+      int ADJ = command.substring(3, command.length() - 1).toInt();
       MotorAdjust(st, ADJ);
     }
 
     // CAMERA STAGE COMMANDS
-    else if (SerialInput.substring(0, 1) == "C") { // Camera move
-      CameraUnderWell = SerialInput.substring(1,2).toInt();
-      CameraPosition = SerialInput.substring(3,SerialInput.length()-1).toInt();
-      Serial1.print(CameraUnderWell);
-      Serial1.print('&');
-      Serial1.print("CHANGE");
+    else if (command.substring(0, 1) == "C") { // Camera move
+      CameraUnderWell = command.substring(1,2).toInt();
+      CameraPosition = command.substring(3,command.length()-1).toInt();
+      OMV.print(CameraUnderWell);
+      OMV.print('&');
+      OMV.print("CHANGE");
       
       Serial.println('#');
       
       CameraMove(CameraPosition);
       CameraMove(CameraPosition);
     }
-    else if (SerialInput.substring(0, 1) == "B") {
-      CameraSpeed = SerialInput.substring(1,SerialInput.length()-1).toInt();
+    else if (command.substring(0, 1) == "B") {
+      CameraSpeed = command.substring(1,command.length()-1).toInt();
       stCamera.setMaxSpeed(CameraSpeed);
       stCamera.setAcceleration(CameraSpeed);
   
     }
-    else if (SerialInput.substring(0, 1) == "V") { // camera reset
+    else if (command.substring(0, 1) == "V") { // camera reset
       CameraReset();
 //      Serial.println("RESET");
     }
-    else if (SerialInput.substring(0, 1) == "X") { // emergency retract
-      int st = SerialInput.substring(1, SerialInput.length() - 1).toInt() - 1;
+    else if (command.substring(0, 1) == "X") { // emergency retract
+      int st = command.substring(1, command.length() - 1).toInt() - 1;
       MotorRetract(st);
     }
-    else if (SerialInput.substring(0, 1) == "P") { // starting Positioning
-      int st = SerialInput.substring(1, 3).toInt() - 1;
-      int action = SerialInput.substring(4, SerialInput.length() - 1).toInt();
+    else if (command.substring(0, 1) == "P") { // starting Positioning
+      int st = command.substring(1, 3).toInt() - 1;
+      int action = command.substring(4, command.length() - 1).toInt();
       StartingPositions(st, action);
     }
   }
 
-if (Serial1.available() > 0) { // FROM OPENMV
-    //    val = Serial1.read
-    mv = Serial1.readStringUntil('\n');
-    Serial1.flush();
+if (OMV.available() > 0) { // FROM OPENMV
+    //    val = OMV.read
+    mv = OMV.readStringUntil('\n');
+    OMV.flush();
     // Serial.println(mv);
     
     int index = mv.indexOf('&'); // find first &
@@ -583,7 +651,7 @@ if (Serial1.available() > 0) { // FROM OPENMV
     MovingCamera = LOW;
     if (ResetCameraFlag == HIGH) {
       ResetCameraFlag = LOW;
-      stCamera.setCurrentPosition(-3250);
+      stCamera.setCurrentPosition(-3200);
       CameraMove(0);
       // CameraUnderWell = 1;
     }
@@ -597,46 +665,60 @@ if (Serial1.available() > 0) { // FROM OPENMV
   // TIMER UPDATE
   if (timerSerial > 50 * 1000) {
 
-    Serial.flush();
-    Serial.print("-33");
-    Serial.print(',');
-    Serial.print(millis()); // Arduino Time
-    Serial.print(',');
-    Serial.print(t_camera);
-    Serial.print('&');
-    Serial.print(CameraUnderWell);
-    Serial.print('&');
-    Serial.print(stretchValue);
-    Serial.print(',');
-    
-    for (int st = 0; st < 4; st++) {
-      //      Serial.print(timers[st]*100/period[st]);
-      //      Serial.print(',');
-      Serial.print(st+1);
-      Serial.print('&');
-      Serial.print(timers[st]/1000);
-      Serial.print('&');
-      Serial.print(stArray[st]->currentPosition());
-      Serial.print('&');
-      Serial.print(dists[st]);
-      Serial.print('&');
-      Serial.print(freqs[st]);
-      Serial.print('&');
-      Serial.print(enableState[st]);
-      Serial.print('&');
-      Serial.print(manualOverride[st]);
-      Serial.print(',');
-//            Serial.print(enableState[st]);
+    if (HELPERFLAG==HIGH) {
+      Serial.flush();
+      Serial.print("HELPER");
+      for (int idx = 0; idx < k; idx++) {
+        
+        Serial.print('&');
+        Serial.print(valueArray[idx]);
+        
+      }
+      Serial.println('#');
+
     }
-    if   (MovingCamera == HIGH) { Serial.print(-1); digitalWrite(10, HIGH);}
-    else                        { Serial.print(rowLabel[CameraUnderWell-1]);  digitalWrite(10, LOW);}
-    Serial.print('&');
-    Serial.print(digitalRead(10));
-    Serial.print('&');
-    Serial.print(stCamera.currentPosition());
-    Serial.print('&'+printstring);
-    
-    Serial.println(' ');
-    timerSerial = 0;
+    else {
+      Serial.flush();
+      Serial.print("-33");
+      Serial.print(',');
+      Serial.print(millis()); // Arduino Time
+      Serial.print(',');
+      Serial.print(t_camera);
+      Serial.print('&');
+      Serial.print(CameraUnderWell);
+      Serial.print('&');
+      Serial.print(stretchValue);
+      Serial.print(',');
+      
+      for (int st = 0; st < 4; st++) {
+        //      Serial.print(timers[st]*100/period[st]);
+        //      Serial.print(',');
+        Serial.print(st+1);
+        Serial.print('&');
+        Serial.print(timers[st]/1000);
+        Serial.print('&');
+        Serial.print(stArray[st]->currentPosition());
+        Serial.print('&');
+        Serial.print(dists[st]);
+        Serial.print('&');
+        Serial.print(freqs[st]);
+        Serial.print('&');
+        Serial.print(enableState[st]);
+        Serial.print('&');
+        Serial.print(manualOverride[st]);
+        Serial.print(',');
+  //            Serial.print(enableState[st]);
+      }
+      if   (MovingCamera == HIGH) { Serial.print(-1); digitalWrite(10, HIGH);}
+      else                        { Serial.print(rowLabel[CameraUnderWell-1]);  digitalWrite(10, LOW);}
+      Serial.print('&');
+      Serial.print(digitalRead(10));
+      Serial.print('&');
+      Serial.print(stCamera.currentPosition());
+      Serial.print('&'+printstring);
+      
+      Serial.println(' ');
+      timerSerial = 0;
+    }
   }
 }
