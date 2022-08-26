@@ -130,7 +130,7 @@ void MotorDistance(int MOTOR, float d) { // CHANGE DISTANCE OF CYCLING
 void MotorFrequency(int MOTOR, float f) { // CHANGE FREQUENCY OF CYCLING
   freqs[MOTOR] = f;
   period[MOTOR] = 1e6 / f;
-  Serial.println(period[MOTOR]);
+  // Serial.println(period[MOTOR]);
   for (int ph = 0; ph < 5; ph++) {
     if   (ph == 4)  { ts[MOTOR][ph] = period[MOTOR]; }
     else            { ts[MOTOR][ph] = sections[ph] * period[MOTOR] / 100; }
@@ -206,7 +206,7 @@ void CameraMove(int CameraPosition) {
   stCamera.moveTo(CameraPosition); 
 }
 void CameraReset() {
-  Serial.print("RESET IN");
+  // Serial.print("RESET IN");
   ResetCameraFlag = HIGH;
 //  enableStateCamera = HIGH;
 //  digitalWrite(SLPCAMERA, enableStateCamera);
@@ -348,6 +348,10 @@ void loop() {
     // Serial.println(command.substring(0, command.length() - 1));
     Serial.flush();
 
+    if (command.substring(0, 6) == "UPDATE") {
+      OMV.println(command);
+      // Serial.print('#');
+    }
     if (command.substring(0, 16) == "POSTMANUALTOGGLE") {
       POSTCENTROIDMANUALFLAG = !POSTCENTROIDMANUALFLAG;
       OMV.print(CameraUnderWell);
@@ -357,7 +361,7 @@ void loop() {
       OMV.print(POSTCENTROIDMANUALFLAG);
       OMV.print('&');
       OMV.println(' ');
-      Serial.print('#');
+      // Serial.print('#');
 
 
     }
@@ -374,7 +378,7 @@ void loop() {
       OMV.print(PostCentroidy);
       OMV.print('&');
       OMV.println(' ');
-      Serial.print('#');
+      // Serial.print('#');
 
       
     }
@@ -389,13 +393,13 @@ void loop() {
       OMV.print(CameraUnderWell);
       OMV.print('&');
       OMV.print("INIT");
-      Serial.println('#');
+      // Serial.println('#');
     }
     else if (command.substring(0, 4) == "POST") {
       OMV.print(CameraUnderWell);
       OMV.print('&');
       OMV.print("POST");
-      Serial.println('#');
+      // Serial.println('#');
     }
 
     else if (command.substring(0, 6) == "THRESH") {
@@ -417,7 +421,7 @@ void loop() {
       OMV.print(lower);
       OMV.print('&');
       OMV.print(upper);
-      Serial.println('#');
+      // Serial.println('#');
       // OMV.println(printstring);
       // Serial.println(input1+printstring);
     }
@@ -428,7 +432,7 @@ void loop() {
       OMV.print(HELPERFLAG);
       OMV.println('#');
 
-      Serial.println("Toggled Helper.");
+      // Serial.println("Toggled Helper.");
 
     }
     else if (command.substring(0, 10) == "HELPERMASK") {
@@ -447,7 +451,7 @@ void loop() {
     }
     else if (command.substring(0, 6) == "HELPER") {
       command = command.substring(6);
-      Serial.println(command);
+      // Serial.println(command);
       
       int i=0, del=0;
 
@@ -476,12 +480,12 @@ void loop() {
       for (int idx = 0; idx < k; idx++) {
         OMV.print('&');
         OMV.print(valueArray[idx]);
-        Serial.print('&');
-        Serial.print(valueArray[idx]);
+        // Serial.print('&');
+        // Serial.print(valueArray[idx]);
         
       }
       OMV.println('#');
-      Serial.println('#');
+      // Serial.println('#');
 
     }
     // MOTOR COMMANDS
@@ -528,7 +532,7 @@ void loop() {
       OMV.print('&');
       OMV.print("CHANGE");
       
-      Serial.println('#');
+      // Serial.println('#');
       
       CameraMove(CameraPosition);
       CameraMove(CameraPosition);
@@ -693,7 +697,7 @@ if (OMV.available() > 0) { // FROM OPENMV
 
   
   // TIMER UPDATE
-  if (timerSerial > 10 * 1000) {
+  if (timerSerial > 50 * 1000) {
 
     if (HELPERFLAG==HIGH) {
       Serial.flush();

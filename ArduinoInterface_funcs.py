@@ -19,15 +19,10 @@ class CS3D_GUI:
         self.WellLocations = [0, 7775, 15550, 23325]
         self.motorFrames = []
         self.moveToButtons = []
-        self.positions = []
-        self.positionLabels = []
-        self.motorT = [0,0,0,0]
-        self.freqs = []
-        self.freqLabel = []
-        self.dists = []
-        self.distLabel = []
-        self.enable = []
-        self.enableLabel = []
+        self.positions, self.positionLabels = [], []
+        self.freqs, self.freqLabel = [], []
+        self.dists, self.distLabel = [], []
+        self.enable, self.enableLabel = [], []
         self.positionHistory = []
         self.stretchHistory = []
         self.stretch = 0
@@ -103,21 +98,29 @@ class CS3D_GUI:
         self.saveLabel.pack()
         self.motorFrames[self.cameraUnderWell-1].configure(borderwidth=7)
 
-        magic = '-1'
-        while magic != '-33':
-            string = self.conn.readline().decode('utf-8')[:-2]
-            self.conn.flush()
-            values = string.split(',')
-            magic = values[0]
+        magic = '0'
+        self.t0 = 0
+        while magic != '-33' and magic != -1:
+            string, magic = self.readFromSerial()
             self.root.after(1)
+            self.t0 = int(string.split(',')[1])
+
+        self.fig = Figure(figsize=(2,2))
+        self.ax = self.fig.add_subplot(111)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().place(relx=0.45, rely=0.6, relwidth=0.3, relheight=0.4)
         
-        self.t0 = int(values[1])
 
+    def readFromSerial(self):
+        string = ''
+        magic = -1
+        if self.ser != None:
+            string = self.conn.readline().decode('utf-8')[:-2]
+            magic = string.split(',')[0]
+            self.conn.flush()
         
-
-
-
-        
+        return string, magic
 
     def writeToSerial(self, string):
         if self.ser != None:
@@ -163,8 +166,7 @@ class CS3D_GUI:
         elif adj == 1:
             self.pos.set(self.pos.get() + 4)
             self.Slider.update()
-        # self.pos = self.positions[self.activeMotor-1]
-        # self.Slider.update()
+        
         self.writeToSerial(string+'\n')
         print(string)
 
@@ -188,52 +190,58 @@ class CS3D_GUI:
         if self.ser == None:
             string = '1'
         else:
-            string = self.conn.readline().decode('utf-8')[:-2]
-            self.conn.flush()
-            
+            string, magic = self.readFromSerial()
             self.values = string.split(',')
             self.motorValues = []
             # print(self.values)
-            if self.values[0] == 'HELPER':
+            magic = self.values.pop(0)
+            if magic == 'HELPER':
                 pass
-            elif self.values[0] == '-33':   
-                self.t = int(self.values[1])
+            elif magic == '-33':
+                self.t = int(self.values.pop(0))
                 print(self.t - self.t0, end=': ')
-                # print(self.t0, end=': ')
-                n_before_motors = 3
-                self.t_camera, self.cameraUnderWell, self.stretch = tuple(self.values[2].split('&'))
-                # print(self.ImageProps)
+                self.t_camera, self.cameraUnderWell, self.stretch = tuple(self.values.pop(0).split('&'))
                 self.cameraUnderWell = int(self.cameraUnderWell)
 
-                for i in range(n_before_motors,n_before_motors+4):
-
+                
+                for i in range(4):
                     self.motorValues.append(self.values[i])
                     # print(self.motorValues[-1])
                     motorID, motorT, position, dist, freq, motorEnable, motorOverride = tuple(self.motorValues[-1].split('&'))
-                    
-                    self.motorT[i-n_before_motors] = int(motorT)
-                    self.positions[i-n_before_motors].set('Current position: '+position+' steps')
-                    self.freqs[i-n_before_motors].set('Frequency: '+freq+' Hz')
-                    self.dists[i-n_before_motors].set('Distance: '+dist+' steps')
+                    self.positions[i].set('Current position: '+position+' steps')
+                    self.freqs[i].set('Frequency: '+freq+' Hz')
+                    self.dists[i].set('Distance: '+dist+' steps')
                     if int(motorEnable) == 1: # disabled
-                        self.enable[i-n_before_motors].set('Disabled')
-                        self.enableLabel[i-n_before_motors].configure(foreground='black')
+                        self.enable[i].set('Disabled')
+                        self.enableLabel[i].configure(foreground='black')
                     else: # enabled
-                        self.enable[i-n_before_motors].set('Enabled')
-                        self.enableLabel[i-n_before_motors].configure(foreground='red')
+                        self.enable[i].set('Enabled')
+                        self.enableLabel[i].configure(foreground='red')
                     
                     if int(motorOverride) == 1:
-                        self.enable[i-n_before_motors].set('Moving Manually')
-                        self.enableLabel[i-n_before_motors].configure(foreground='green')
+                        self.enable[i].set('Moving Manually')
+                        self.enableLabel[i].configure(foreground='green')
                     
                     
                     # print("{0},{1}".format(self.motorT[i-n_before_motors], self.positions[i-n_before_motors].get()), end=' // ')
                     
-                    self.positionLabels[i-n_before_motors].update()
+                    self.positionLabels[i].update()
                     # print(' // ', end=' ')
                 # print(self.motorValues)
                 # print(' ')
                 self.cameraVals = self.values[-1].split('&')
+                # print(self.stretchHistory)
+                # print(self.stretch)
+                self.stretchHistory.append(float(self.stretch))
+                self.positionHistory.append(float(self.positions[0].get().split(': ')[1].split(' ')[0]))
+
+                if len(self.stretchHistory) > 100:
+                    self.stretchHistory.pop(0)
+                    self.positionHistory.pop(0)
+
+                # self.ax.clear()
+                # self.ax.plot(self.positionHistory, self.stretchHistory)
+                # self.canvas.draw()
                 
             # print([self.positions[i].get() for i in range(4)])
             if self.saveDataFlag == True:
@@ -243,7 +251,9 @@ class CS3D_GUI:
             # print("{}: {}".format(len(self.stretchHistory), self.stretchHistory))
             # print("{}: {}".format(len(self.positionHistory), self.positionHistory))
             # print(string)
-            print("{}, {}".format(self.positions[self.cameraUnderWell-1].get(),self.stretch))
+            # print("{}, {}".format(self.positions[self.cameraUnderWell-1].get(),self.stretch))
+            # print(self.positions[0].get().split(': ')[1].split(' ')[0])
+            print(self.values)
         self.root.after(1, self.update)
     
     
