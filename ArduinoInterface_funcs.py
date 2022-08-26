@@ -1,6 +1,8 @@
 from serial import Serial
 import tkinter as tk
 import threading
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 class CS3D_GUI:
     def __init__(self, root, ser=None):
@@ -99,6 +101,23 @@ class CS3D_GUI:
         self.saveButton.pack()
         self.saveLabel = tk.Label(self.root, text='')
         self.saveLabel.pack()
+        self.motorFrames[self.cameraUnderWell-1].configure(borderwidth=7)
+
+        magic = '-1'
+        while magic != '-33':
+            string = self.conn.readline().decode('utf-8')[:-2]
+            self.conn.flush()
+            values = string.split(',')
+            magic = values[0]
+            self.root.after(1)
+        
+        self.t0 = int(values[1])
+
+        
+
+
+
+        
 
     def writeToSerial(self, string):
         if self.ser != None:
@@ -123,6 +142,8 @@ class CS3D_GUI:
         self.writeToSerial(string+'\n')
     
     def plot(self):
+        fig = Figure(figsize= (5,5), dpi=100)
+
         self.ax.clear()
         self.ax.plot(self.positionHistory, self.stretchHistory)
         pass
@@ -176,18 +197,16 @@ class CS3D_GUI:
             if self.values[0] == 'HELPER':
                 pass
             elif self.values[0] == '-33':   
-                self.t = self.values[1]
-                print(self.t, end=': ')
+                self.t = int(self.values[1])
+                print(self.t - self.t0, end=': ')
+                # print(self.t0, end=': ')
                 n_before_motors = 3
                 self.t_camera, self.cameraUnderWell, self.stretch = tuple(self.values[2].split('&'))
                 # print(self.ImageProps)
                 self.cameraUnderWell = int(self.cameraUnderWell)
 
                 for i in range(n_before_motors,n_before_motors+4):
-                    # if i == int(self.cameraUnderWell)+n_before_motors-1:
-                    #     self.motorFrames[i-n_before_motors].configure(borderwidth=7)
-                    # else:
-                    #     self.motorFrames[i-n_before_motors].configure(borderwidth=2)
+
                     self.motorValues.append(self.values[i])
                     # print(self.motorValues[-1])
                     motorID, motorT, position, dist, freq, motorEnable, motorOverride = tuple(self.motorValues[-1].split('&'))
@@ -224,7 +243,7 @@ class CS3D_GUI:
             # print("{}: {}".format(len(self.stretchHistory), self.stretchHistory))
             # print("{}: {}".format(len(self.positionHistory), self.positionHistory))
             # print(string)
-            print(self.values)
+            print("{}, {}".format(self.positions[self.cameraUnderWell-1].get(),self.stretch))
         self.root.after(1, self.update)
     
     

@@ -390,7 +390,7 @@ class PostAndMagnetTracker:
         self.image_scale = 3
         self.spring_constant = 0.159
 
-        self.automatic_thresh = True  # Automatically determine the thresholds
+        self.automatic_thresh = False  # Automatically determine the thresholds
 
         # Lazily initialized when first image is processed
         self.passive_deflection = None  # deflection in pixels
@@ -422,7 +422,7 @@ class PostAndMagnetTracker:
         self.fps = fps
 
     # This should be private
-    def initPassive(self, img, stats_m, stats_p):
+    def initPassive(self, img, stats_m, stats_p, postManualFlag, postManual):
         if stats_m == None or stats_p == None:
             return (0,0), (0,0)
         title_height = 80
@@ -440,7 +440,10 @@ class PostAndMagnetTracker:
         print(stats_p)
         self.automatic_thresh = False
         centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
-        centroid_p = np.array((stats_p[0].cx(), stats_m[0].cy()))
+        if postManualFlag:
+          centroid_p = np.array(postManual)
+        else:
+            centroid_p = np.array((stats_p[0].cx(), stats_m[0].cy()))
         dx = centroid_m[0] - centroid_p[0]
         dy = centroid_m[1] - centroid_p[1]
 
@@ -684,7 +687,7 @@ class PostAndMagnetTracker:
         twitch_tension = self.spring_constant * displacement * self.microns_per_pixel
         return passive_tension, twitch_tension
 
-    def processImage(self, img, capture_time_ms, value, plotting_paramters, func):
+    def processImage(self, img, capture_time_ms, value, plotting_paramters, func, postManualFlag, postManual):
 
         old_values = value
         # Locate magnet and post
@@ -694,7 +697,8 @@ class PostAndMagnetTracker:
         if self.automatic_thresh:
             stats_m = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet)
             # if self.post_centroid is None:
-            stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
+            if not postManualFlag:
+		stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
             
             # stats_m, stats_p = locate_magnet_and_post(img, self.thresh_range, self.area_range, self.roi)
             if len(stats_m) == 0 or len(stats_p) == 0:
@@ -705,7 +709,10 @@ class PostAndMagnetTracker:
         # Return statistics for the magnet and post (if found)
         stats_m = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet)
         #if self.post_centroid is None:
-        stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
+        if not postManualFlag:
+	    stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
+	else:
+	    stats_p = [-1]
         # stats_m, stats_p = locate_magnet_and_post(img, self.thresh_range, self.area_range, self.roi)
 
         # Choose best one
@@ -726,6 +733,8 @@ class PostAndMagnetTracker:
 
             milliseconds = self.maxTracker.time()
             time_of_max = self.maxTracker.time_of_maximums()
+            if postManualFlag:
+		centroid_p = postManual
             plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
             #centroid_m, centroid_p, milliseconds, time_of_max, value = plotting_parameters
             #ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
@@ -736,7 +745,10 @@ class PostAndMagnetTracker:
         # Also set the zoom in ranges and the rotation transform
 
         centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
-        centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
+        if not postManual:
+            centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
+        else:
+	    centroid_p = np.array(postManual)
         dist_current = np.linalg.norm(centroid_m - centroid_p)
         twitch_deflection = dist_current - self.dist_neutral
         # print('twitch deflection=', twitch_deflection)
@@ -777,19 +789,23 @@ class PostAndMagnetTracker:
         time_of_max = self.maxTracker.time_of_maximums()
         maximums = self.maxTracker.maximums()
         centroid_m = (stats_m[0].cx(), stats_m[0].cy())
-        centroid_p = (stats_p[0].cx(), stats_p[0].cy())
+        if postManualFlag:
+	    centroid_p = postManual
+	else:
+            centroid_p = (stats_p[0].cx(), stats_p[0].cy())
 
         plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
         #print(plotting_parameters)
         #ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, milliseconds, time_of_max, value)
         #outputs = (passiveLengthCalcFlag, self.dist_neutral, self.passive_deflection)
-        for stat in stats_p:
-            x,y,r = stat.enclosing_circle()
-            
-            img.draw_circle(x,y,r,color=(0,255,0), thickness=2)
-            
-            x,y,w,h = stat.rect()
-            img.draw_rectangle(x,y,w,h,color=(255,255,0), thickness=4)
+        if not postManualFlag:
+	    for stat in stats_p:
+		x,y,r = stat.enclosing_circle()
+		
+		img.draw_circle(x,y,r,color=(0,255,0), thickness=2)
+		
+		x,y,w,h = stat.rect()
+		img.draw_rectangle(x,y,w,h,color=(255,255,0), thickness=4)
         return value, plotting_parameters
 
         # ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p,
@@ -857,7 +873,7 @@ class PostAndMagnetTracker:
             
             # Determine title
                 
-            title = "Row {}"(well_row)
+            title = "Row {}".format(well_row)
             title += "     {} s".format(round(milliseconds[-1]/1000,1))
             title += "\nStretch: %4.2f%%" % stretch[-1]
             if len(beat_freq) > 0:
@@ -1355,7 +1371,7 @@ def VisualizeThresholdSearch(img, thresh, stats_m, stats_p):
         bw.draw_string(20, 20, "%d" % thresh, scale=3, color=100, mono_space=False)  # Show the threshold
         utime.sleep_ms(200)
 
-def locate_magnet(img, thresh_range, area_range, roi=(0,0,sensor.width(), sensor.height()), aspectratio = 0.9, extent = 0.6) -> ({}, {}):
+def locate_magnet(img, thresh_range, area_range, roi=(0,0,sensor.width(), sensor.height()), aspectratio = (0.9,10), extent = 0.6) -> ({}, {}):
     height = sensor.height()
     width = sensor.width()
 
@@ -1415,7 +1431,7 @@ def locate_post(img, thresh_range, area_range, roi, circularity=0.4) -> ({}, {})
     #
     # post detector
     #
-    stats_p = img.find_blobs( [thresh_range[1]], pixels_threshold=area_range[1][0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]), x_stride=0, y_stride=0)
+    stats_p = img.find_blobs( [thresh_range[1]], pixels_threshold=area_range[1][0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]), x_stride=5, y_stride=5)
     got_one = len(stats_p) > 0
     # print("--- stats_p ---")
     # print(stats_p)

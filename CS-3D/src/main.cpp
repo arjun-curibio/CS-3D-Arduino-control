@@ -61,13 +61,14 @@ boolean firstCycle[4]     = {HIGH, HIGH, HIGH, HIGH};
 boolean enableState[4]    = { LOW,  LOW,  LOW,  LOW};
 
 // CAMERA VARIABLES
-int     CameraUnderWell     = 1;
-boolean MovingCamera        = LOW;
-int 	  CameraSpeed 		    = 2500;
-int     CameraPosition      = 0;
-boolean enableStateCamera   = LOW; // LOW to disable
-boolean ResetCameraFlag     = HIGH;
-char    rowLabel[4]         = {'A', 'B', 'C', 'D'};
+int     CameraUnderWell         = 1;
+boolean MovingCamera            = LOW;
+int 	  CameraSpeed 		        = 2500;
+int     CameraPosition          = 0;
+boolean enableStateCamera       = LOW; // LOW to disable
+boolean ResetCameraFlag         = HIGH;
+char    rowLabel[4]             = {'A', 'B', 'C', 'D'};
+boolean POSTCENTROIDMANUALFLAG  = LOW;
 
 
 // TIMING VARIABLES
@@ -347,9 +348,38 @@ void loop() {
     // Serial.println(command.substring(0, command.length() - 1));
     Serial.flush();
 
+    if (command.substring(0, 16) == "POSTMANUALTOGGLE") {
+      POSTCENTROIDMANUALFLAG = !POSTCENTROIDMANUALFLAG;
+      OMV.print(CameraUnderWell);
+      OMV.print('&');
+      OMV.print("POSTMANUALTOGGLE");
+      OMV.print('&');
+      OMV.print(POSTCENTROIDMANUALFLAG);
+      OMV.print('&');
+      OMV.println(' ');
+      Serial.print('#');
 
+
+    }
+    else if (command.substring(0, 10) == "POSTMANUAL") {
+      int del = command.indexOf(',');
+      int PostCentroidx = command.substring(10, del).toInt();
+      int PostCentroidy = command.substring(del+1, command.length()-1).toInt();
+      OMV.print(CameraUnderWell);
+      OMV.print('&');
+      OMV.print("POSTMANUAL");
+      OMV.print('&');
+      OMV.print(PostCentroidx);
+      OMV.print('&');
+      OMV.print(PostCentroidy);
+      OMV.print('&');
+      OMV.println(' ');
+      Serial.print('#');
+
+      
+    }
     // CAMERA COMMANDS PASS THROUGH TO OPENMV 
-    if (command.substring(0, 4) == "INIT") {
+    else if (command.substring(0, 4) == "INIT") {
       // camera initialization routine
       //CameraUnderWell = command.substring(5,6).toInt();
       if (enableState[CameraUnderWell-1] == LOW) {
@@ -663,7 +693,7 @@ if (OMV.available() > 0) { // FROM OPENMV
 
   
   // TIMER UPDATE
-  if (timerSerial > 50 * 1000) {
+  if (timerSerial > 10 * 1000) {
 
     if (HELPERFLAG==HIGH) {
       Serial.flush();

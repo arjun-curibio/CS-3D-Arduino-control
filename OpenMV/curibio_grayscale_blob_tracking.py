@@ -98,7 +98,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     
     
     
-    HELPERFLAG = True
+    HELPERFLAG = False
     HELPERMASK = "POST"
     helper_magnet_thresh = (20,50)
     helper_post_thresh = (0,10)
@@ -108,6 +108,9 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     helper_magnet_aspectratio = (0.9,10)
     helper_post_circularity = 0.4
     # for i in range(0, nframes):
+    
+    postManualFlag = False
+    postManual = (100,250)
     
     extra_fb = sensor.alloc_extra_fb(sensor.width(), sensor.height(), sensor.GRAYSCALE)
     extra_fb.replace(sensor.snapshot())
@@ -132,6 +135,12 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                 current_well = int(infos[0]) # always starts with integer - well number
                 if infos[1] == 'INIT':
                     initFlag[current_well-1] = True # flip initFlag high
+                elif infos[1] == 'POSTMANUALTOGGLE':
+		    postManualFlag = bool(int(infos[2]))
+		    
+		elif infos[1] == 'POSTMANUAL':
+		    postManual = (int(infos[2]), int(infos[3]))
+		    
                 elif infos[1] == 'CHANGE':
                     pass # only thing this updates is the well number
                 elif infos[1] == 'POST':
@@ -209,17 +218,13 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             
             if HELPERMASK=='POST':
                 img.binary([helper_post_thresh], False, False)
-                
             elif HELPERMASK=='MAGNET':
                 img.binary([helper_magnet_thresh], False, False)
-                
             else:
                 pass
             img.to_rgb565()
-            
             img.draw_rectangle(0, 0, sensor.width(), 150, (0,0,0), 0, True)
             img.draw_string(1,1,"MASKING: {}".format(HELPERMASK), scale=5, color=(0,255,0),x_spacing=-10)
-            
             txt= """                     Magnet | Post
 		   Threshold: (%5.0f,%5.0f) | (%5.0f,%5.0f)
 		        Area: (%5.0f,%5.0f) | (%5.0f,%6.0f)
@@ -231,7 +236,6 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             helper_magnet_extent,
             helper_magnet_aspectratio[0], helper_magnet_aspectratio[1], 0.9, 1.1,
             helper_post_circularity)
-            
             img.draw_string(1,50,txt, x_spacing=-1,y_spacing=-1, scale=1.5, color=(0,255,0))
             
             k=0
@@ -245,11 +249,9 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                     else:
                         img.draw_rectangle(blob.rect(), thickness=th, color=(255,0,0))
                     #print("{},{},{},{},{},{},{}".format(blob[0],blob[1],blob[2],blob[3], blob.pixels(), blob.extent(), cb.getAspectRatio(blob)), end=',')
-                
                 else:
                     th = 1
                     s = 2
-                    
                 img.draw_rectangle(blob.rect(), thickness=th, color=(255,0,0))
                 
                 #img.flood_fill(blob.cx(), blob.cy(), color=(255,0,0))
@@ -270,11 +272,9 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                 #img.draw_string(blob.cx()+1, blob.cy()+1, "Solid: \n"+str(round(blob.solidity(),2)), scale=2, color=(255,155,0))
                 #img.draw_string(blob.cx()+1, blob.cy()+1, "Rot: \n"+str(round(blob.rotation_deg(),2)), scale=2, color=(255,155,0))
                 img.draw_string(blob.cx()+1, blob.cy()+1, "E:%3.2f\nX:%3.2f\nAR:%3.2f" % (blob.elongation(), blob.extent(),cb.getAspectRatio(blob)), scale=1, color=(255,155,0))
-                
                 k += 1
                 # Note - the blob rotation is unique to 0-180 only.
                 # bw.draw_keypoints([(blob.cx(), blob.cy(), int(blob.rotation_deg()))], size=40, color=127)
-            
             k=0
             for blob in stats_p:
                 if k==0:
@@ -304,7 +304,6 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                 k=k+1
                 # Note - the blob rotation is unique to 0-180 only.
                 # bw.draw_keypoints([(blob.cx(), blob.cy(), int(blob.rotation_deg()))], size=40, color=127)
-                
             #print(' ')
             toc = utime.ticks_ms() - t0
             if (toc > tic):
@@ -321,19 +320,22 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             tracker.dist_neutral = None # reset for initPassive function
 
             stats_m = cb.locate_magnet(img, tracker.thresh_range, tracker.area_range, ROI_magnet)
-            stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post)
-
+            if not postManualFlag:
+                stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post)
+	    else:
+		stats_p = [-1]
             if len(stats_m) == 0 or len(stats_p) == 0:
                 # run determine thresholds function to get new thresholds (needs more work to get more appropriate thresholds)
                 tracker.thresh_range, tracker.area_range = cb.determineThresholds(img, tracker.area_range, tracker.roi, tracker.roi_post, tracker.roi_magnet, visualize=False)
 
                 # get new stats
                 stats_m = cb.locate_magnet(img, tracker.thresh_range, tracker.area_range, ROI_magnet)
-                stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post)
+                if not postManualFlag:
+		    stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post)
                 print(tracker.thresh_range)
             
             # put stats through initPassive function to set passive length variables in tracker and in script
-            centroid_m_passive[current_well-1], centroid_p_passive[current_well-1] = tracker.initPassive(img, stats_m, stats_p)
+            centroid_m_passive[current_well-1], centroid_p_passive[current_well-1] = tracker.initPassive(img, stats_m, stats_p, postManualFlag, postManual)
 
             # convert from numpy array to tuple for future use
             centroid_p_passive[current_well-1] = tuple(list(centroid_p_passive[current_well-1]))
@@ -360,7 +362,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                 tracker.thresh_range = (new_magnet_threshold, tracker.thresh_range[1])
 
             # Modified processImage function, without plotting.  plotting_paramters might be duplicate of information already stored in tracker (or information that can be stored in tracker)
-            value, plotting_parameters = tracker.processImage(img, tic, value, plotting_parameters, cb.PostAndMagnetTracker.computeStretch)
+            value, plotting_parameters = tracker.processImage(img, tic, value, plotting_parameters, cb.PostAndMagnetTracker.computeStretch, postManualFlag, postManual)
 
             # values stored in plotting parameters:
             #  centroid_m
@@ -382,7 +384,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             #   time of max
             #   value - stretch, freq, last maximum
             #   well number
-            ret, rotated = tracker.showTrackingOscilloscope((img, centroid_m[current_well-1], centroid_p_passive[current_well-1], milliseconds, time_of_max, value, current_well))
+            ret, rotated = tracker.showTrackingOscilloscope(img, centroid_m[current_well-1], centroid_p[current_well-1], milliseconds, time_of_max, value, current_well)
 
             if ret != 0:
                 continue
@@ -424,7 +426,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
         if (toc > tic):
             frame_rate = 1000.0/(toc-tic)
             tracker.setFps(frame_rate)  # Used to compute beat_frequency
-            print("Nothing happened, {}, {}".format(frame_rate, current_well))
+            print("Nothing happened, {}, {}, {}, {}".format(frame_rate, current_well, postManualFlag, postManual))
 
 
 show_stretch_cytostretcher_MV(outfile=None)  # Use defaults
