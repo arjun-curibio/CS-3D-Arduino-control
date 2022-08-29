@@ -208,6 +208,13 @@ class MaxTracker:
         self.count = -1  # Number of values processed
         self.last_20 = [] # Last 20 signal values (used to apply hysteresis-based max finding)
 
+    def process_without_max(self, t, v) -> int:
+        direction = 0
+        self.count += 1
+        self.milliseconds.append(t)
+        self.tracker.append(v)
+        return direction
+
     def process(self, t, v) -> int:
         """ Process time and signal value while looking for maximums
         Pass in the values sequentially
@@ -423,8 +430,6 @@ class PostAndMagnetTracker:
 
     # This should be private
     def initPassive(self, img, stats_m, stats_p, postManualFlag, postManual):
-        if stats_m == None or stats_p == None:
-            return (0,0), (0,0)
         title_height = 80
         left_padding = 120
         right_padding = 120
@@ -432,6 +437,11 @@ class PostAndMagnetTracker:
         bottom_padding = 25
         zoom_factor = 1.0
 
+        if postManualFlag:
+            centroid_p = postManual
+        elif stats_m == None or stats_p == None:
+            return (0,0), (0,0)
+        
         # Initialize state from first image
         # Assume all images will be the same size
         height = sensor.height()
@@ -439,9 +449,9 @@ class PostAndMagnetTracker:
         print(stats_m)
         print(stats_p)
         self.automatic_thresh = False
-        centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
+        centroid_m = np.array((stats_m.cx(), stats_m.cy()))
         if postManualFlag:
-          centroid_p = np.array(postManual)
+            centroid_p = np.array(postManual)
         else:
             centroid_p = np.array((stats_p[0].cx(), stats_m[0].cy()))
         dx = centroid_m[0] - centroid_p[0]
@@ -489,10 +499,12 @@ class PostAndMagnetTracker:
             self.zoom_rect = (min_col, min_row, max_col - min_col, max_row - min_row)
 
             # Remember post centroid.  Comment this out to compute the post centroid each time
-            self.post_centroid = stats_p
+            # self.post_centroid = stats_p
+            self.post_centroid = (stats_p.cx(), stats_p.cy())
 
             # Determine location of title rect
-            self.title_rect = (min_col, max(min_row - title_height, 0), max_col - min_col, title_height)
+            # self.title_rect = (min_col, max(min_row - title_height, 0), max_col - min_col, title_height)
+            self.title_rect = (0, 0, sensor.width(), 80)
 
             # Determine location of oscilloscope rect
             oscilloscope_height = max(height - max_row, 120)
@@ -687,8 +699,8 @@ class PostAndMagnetTracker:
         twitch_tension = self.spring_constant * displacement * self.microns_per_pixel
         return passive_tension, twitch_tension
 
-    def processImage(self, img, capture_time_ms, value, plotting_paramters, func, postManualFlag, postManual):
-
+    def processImage(self, img, capture_time_ms, value, plotting_parameters, func, postManualFlag, postManual):
+        old_plotting_parameters = plotting_parameters
         old_values = value
         # Locate magnet and post
         width = sensor.width()
@@ -698,7 +710,7 @@ class PostAndMagnetTracker:
             stats_m = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet)
             # if self.post_centroid is None:
             if not postManualFlag:
-		stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
+                stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
             
             # stats_m, stats_p = locate_magnet_and_post(img, self.thresh_range, self.area_range, self.roi)
             if len(stats_m) == 0 or len(stats_p) == 0:
@@ -708,53 +720,57 @@ class PostAndMagnetTracker:
 
         # Return statistics for the magnet and post (if found)
         stats_m = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet)
-        #if self.post_centroid is None:
-        if not postManualFlag:
-	    stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
-	else:
-	    stats_p = [-1]
-        # stats_m, stats_p = locate_magnet_and_post(img, self.thresh_range, self.area_range, self.roi)
-
-        # Choose best one
         if len(stats_m) > 0:
-            stats_m = [stats_m[0]]  # Choose best one
-        if len(stats_p) > 0:
-            stats_p = [stats_p[0]]  # Choose best one
-
-        if len(stats_m) == 0 or len(stats_p) == 0:
-            if len(stats_m) == 0:
-                centroid_m = None
-            else:
-                centroid_m = (stats_m[0].cx(), stats_m[0].cy())
-            if len(stats_p) == 0:
-                centroid_p = None
-            else:
-                centroid_p = (stats_p[0].cx(), stats_p[0].cy())
-
-            milliseconds = self.maxTracker.time()
-            time_of_max = self.maxTracker.time_of_maximums()
-            if postManualFlag:
-		centroid_p = postManual
-            plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
-            #centroid_m, centroid_p, milliseconds, time_of_max, value = plotting_parameters
-            #ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
-            #plotting_parameters = (centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
-            return old_values, plotting_parameters
-            
-        # First time through, set the passive deflection (in pixels)
-        # Also set the zoom in ranges and the rotation transform
-
-        centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
-        if not postManual:
-            centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
+            stats_m = [stats_m[0]]
+            centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
+        elif len(stats_m) == 0:
+            centroid_m = np.array(old_plotting_parameters[0])
+        elif stats_m == None:
+            centroid_m = np.array(old_plotting_parameters[0])
+        
+        #if self.post_centroid is None:
+        if postManualFlag:
+            stats_p = None
+            centroid_p = postManual
         else:
-	    centroid_p = np.array(postManual)
+            stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post)
+            # Choose best one
+            if len(stats_p) > 0:
+                stats_p = [stats_p[0]]  # Choose best one
+                centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
+            elif len(stats_p) == 0:
+                centroid_p = np.array(old_plotting_parameters[1])
+            elif stats_p == None:
+                centroid_p = np.array(old_plotting_parameters[1])
+            
         dist_current = np.linalg.norm(centroid_m - centroid_p)
         twitch_deflection = dist_current - self.dist_neutral
         # print('twitch deflection=', twitch_deflection)
         # Track the capture time, deflection and max
-        self.maxTracker.process(capture_time_ms, twitch_deflection)
+        self.maxTracker.process_without_max(capture_time_ms, twitch_deflection)
+        
         value = func(self, self.maxTracker)  # returns 
+
+        milliseconds = self.maxTracker.time()
+        time_of_max = self.maxTracker.time_of_maximums()
+        plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
+        #centroid_m, centroid_p, milliseconds, time_of_max, value = plotting_parameters
+        #ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
+        #plotting_parameters = (centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
+        if not postManualFlag:
+            for stat in stats_p:
+                x,y,r = stat.enclosing_circle()
+                
+                img.draw_circle(x,y,r,color=(0,255,0), thickness=2)
+                
+                x,y,w,h = stat.rect()
+                img.draw_rectangle(x,y,w,h,color=(255,255,0), thickness=4)
+        
+        return old_values, plotting_parameters
+            
+        # First time through, set the passive deflection (in pixels)
+        # Also set the zoom in ranges and the rotation transform
+
         # First time through or until first max (within first two seconds)
         # if self.passive_deflection is None or (len(self.maxTracker.maximums()) < 1 and capture_time_ms < self.wait_until):
         #     self.initPassive(img, stats_m, stats_p)
@@ -790,8 +806,8 @@ class PostAndMagnetTracker:
         maximums = self.maxTracker.maximums()
         centroid_m = (stats_m[0].cx(), stats_m[0].cy())
         if postManualFlag:
-	    centroid_p = postManual
-	else:
+            centroid_p = postManual
+        else:
             centroid_p = (stats_p[0].cx(), stats_p[0].cy())
 
         plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
@@ -799,13 +815,13 @@ class PostAndMagnetTracker:
         #ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, milliseconds, time_of_max, value)
         #outputs = (passiveLengthCalcFlag, self.dist_neutral, self.passive_deflection)
         if not postManualFlag:
-	    for stat in stats_p:
-		x,y,r = stat.enclosing_circle()
-		
-		img.draw_circle(x,y,r,color=(0,255,0), thickness=2)
-		
-		x,y,w,h = stat.rect()
-		img.draw_rectangle(x,y,w,h,color=(255,255,0), thickness=4)
+            for stat in stats_p:
+                x,y,r = stat.enclosing_circle()
+                
+                img.draw_circle(x,y,r,color=(0,255,0), thickness=2)
+                
+                x,y,w,h = stat.rect()
+                img.draw_rectangle(x,y,w,h,color=(255,255,0), thickness=4)
         return value, plotting_parameters
 
         # ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p,
@@ -1080,7 +1096,7 @@ def determineThresholds(img, area_range, roi, roi_post, roi_magnet, visualize=Fa
         thresh_m = [0, int(r[idx_m] + runlen_m[runmax_m] // 2)]
         # print("thresh_m=", thresh_m)
     else:
-        thresh_m = None
+        thresh_m = (0,70)
         idx_m = None
 
     # Determine runs for post
@@ -1095,7 +1111,7 @@ def determineThresholds(img, area_range, roi, roi_post, roi_magnet, visualize=Fa
         idx_p = runs_p[0][runmax_p]
         thresh_p = (0, int(r[idx_p] + runlen_p[runmax_p] // 2))
     else:
-        thresh_p = None
+        thresh_p = (0,10)
         idx_p = None
 
     if visualize:

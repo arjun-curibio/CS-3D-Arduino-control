@@ -5,6 +5,7 @@
 #
 # Version: 2022_07_15
 
+from calendar import c
 import sensor, image, time, math, mjpeg
 import CuriBio_MV as cb
 import utime
@@ -128,7 +129,6 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                 #if val[-3] != '#':
                     #continue
                 val = val.split('#')[0] # split by occasional # at end
-                val = str(val) # convert to string (may be unnecessary)
                 infos = val.split('&') # split based on incoming delimiter
                 print(infos)
 
@@ -136,11 +136,9 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                 if infos[1] == 'INIT':
                     initFlag[current_well-1] = True # flip initFlag high
                 elif infos[1] == 'POSTMANUALTOGGLE':
-		    postManualFlag = bool(int(infos[2]))
-		    
-		elif infos[1] == 'POSTMANUAL':
-		    postManual = (int(infos[2]), int(infos[3]))
-		    
+                    postManualFlag = bool(int(infos[2]))
+                elif infos[1] == 'POSTMANUAL':
+                    postManual = (int(infos[2]), int(infos[3]))
                 elif infos[1] == 'CHANGE':
                     pass # only thing this updates is the well number
                 elif infos[1] == 'POST':
@@ -319,19 +317,15 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             tracker.passive_deflection = None # reset for initPassive function
             tracker.dist_neutral = None # reset for initPassive function
 
-            stats_m = cb.locate_magnet(img, tracker.thresh_range, tracker.area_range, ROI_magnet)
-            if not postManualFlag:
-                stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post)
-	    else:
-		stats_p = [-1]
+            stats_m = cb.locate_magnet(img, tracker.thresh_range, tracker.area_range, ROI_magnet, extent=0.7, aspectratio=(0.7, 2.0))
+            stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post)
             if len(stats_m) == 0 or len(stats_p) == 0:
                 # run determine thresholds function to get new thresholds (needs more work to get more appropriate thresholds)
                 tracker.thresh_range, tracker.area_range = cb.determineThresholds(img, tracker.area_range, tracker.roi, tracker.roi_post, tracker.roi_magnet, visualize=False)
 
                 # get new stats
                 stats_m = cb.locate_magnet(img, tracker.thresh_range, tracker.area_range, ROI_magnet)
-                if not postManualFlag:
-		    stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post)
+                stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post)
                 print(tracker.thresh_range)
             
             # put stats through initPassive function to set passive length variables in tracker and in script
@@ -386,10 +380,12 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             #   well number
             ret, rotated = tracker.showTrackingOscilloscope(img, centroid_m[current_well-1], centroid_p[current_well-1], milliseconds, time_of_max, value, current_well)
 
+            img.draw_circle(centroid_m_passive[current_well-1].cx(), centroid_m_passive[current_well-1].cy(), 10, color=255, fill=True)
+            img.draw_circle(centroid_p_passive[current_well-1].cx(), centroid_p_passive[current_well-1].cy(), 15, color=155, fill=True)
+            img.draw_line(centroid_p[current_well-1].cx(), centroid_p[current_well-1].cy(), centroid_m[current_well-1].cx(), centroid_m[current_well-1].cy(), color=0, thickness=2)
+            
             if ret != 0:
                 continue
-
-
 
             if  len(value[0]) > 0 and len(value[1]) > 0:
                 stretch = value[0][-1]
