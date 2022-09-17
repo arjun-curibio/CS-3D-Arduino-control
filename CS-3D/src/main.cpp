@@ -352,7 +352,12 @@ void loop() {
       OMV.println(command);
       // Serial.print('#');
     }
-    if (command.substring(0, 16) == "POSTMANUALTOGGLE") {
+    if (command.substring(0, 6) == "CSPEED") {
+      CameraSpeed = command.substring(7, command.length()-1).toInt();
+      stCamera.setMaxSpeed(CameraSpeed);
+      stCamera.setAcceleration(CameraSpeed);
+    }
+    else if (command.substring(0, 16) == "POSTMANUALTOGGLE") {
       POSTCENTROIDMANUALFLAG = !POSTCENTROIDMANUALFLAG;
       OMV.print(CameraUnderWell);
       OMV.print('&');
@@ -448,6 +453,45 @@ void loop() {
       OMV.print("&HELPERMASK&");
       OMV.print(HELPERMASK);
       OMV.println('#');
+    }
+    else if (command.substring(0, 9) == "PARAMETER") {
+      command = command.substring(9);
+      // Serial.println(command);
+      
+      int i=0, del=0;
+
+      for (int idx = 0; idx < 50; idx++){
+          valueArray[idx] = -55; // reset default to -55
+      }
+      k = 0;
+      while (del != -1) {
+        // Serial.println("in parsing loop");
+        del = command.indexOf(',');
+        valueArray[i] = command.substring(0,del).toInt();
+        command = command.substring(del+1);
+        k=k+1;
+        i = i + 1;
+      }
+      // for( int idx = 0; idx < 50; idx++) {
+      //   Serial.print(valueArray[idx]);
+      //   Serial.print(',');
+      // }
+      // Serial.println(' ');
+      OMV.print(CameraUnderWell);
+      OMV.print("&PARAMETER");
+
+      Serial.print(CameraUnderWell);
+      Serial.print("&PARAMETER");
+      for (int idx = 0; idx < k; idx++) {
+        OMV.print('&');
+        OMV.print(valueArray[idx]);
+        // Serial.print('&');
+        // Serial.print(valueArray[idx]);
+        
+      }
+      OMV.println('#');
+      // Serial.println('#');
+
     }
     else if (command.substring(0, 6) == "HELPER") {
       command = command.substring(6);
@@ -663,7 +707,7 @@ if (OMV.available() > 0) { // FROM OPENMV
         stArray[st] -> run();
         if (stArray[st]->currentPosition() == -7000) {
           MotorResetPosition(st);
-          MotorManual(st, 500);
+          MotorManual(st, 0);
         }
 		if (stArray[st]->distanceToGo() == 0) {
 			manualOverride[st] = LOW;

@@ -28,8 +28,8 @@ class HELPER_GUI:
         
         self.rs_magnet_thresh = RangeSliderH(self.root, [self.magnet_thresh_low, self.magnet_thresh_high], min_val = 0, max_val = 155, padX=20, digit_precision='1.0f')
         self.rs_post_thresh = RangeSliderH(self.root, [self.post_thresh_low, self.post_thresh_high], min_val = 0, max_val = 50,  padX=20, digit_precision='1.0f')
-        self.rs_magnet_area = RangeSliderH(self.root, [self.magnet_area_low, self.magnet_area_high], min_val = 0, max_val = 5000,  padX=40, digit_precision='4.0f')
-        self.rs_post_area = RangeSliderH(self.root, [self.post_area_low, self.post_area_high], min_val = 0, max_val = 25000,  padX=40, digit_precision='4.0f')
+        self.rs_magnet_area = RangeSliderH(self.root, [self.magnet_area_low, self.magnet_area_high], min_val = 500, max_val = 5000,  padX=40, digit_precision='4.0f')
+        self.rs_post_area = RangeSliderH(self.root, [self.post_area_low, self.post_area_high], min_val = 1000, max_val = 25000,  padX=40, digit_precision='4.0f')
         
         self.s_magnet_extent        = tk.Scale(self.root, from_=0, to=1,    variable=self.magnet_extent,        resolution=0.1, orient='horizontal')
         
@@ -46,7 +46,8 @@ class HELPER_GUI:
         self.s_post_circularity.pack()
         
         def sendToggle():
-            self.conn.write("HELPERTOGGLE#\n".encode())
+            self.conn.write("HELPERTOGGLE\n".encode())
+            print("HELPERTOGGLE\n")
         self.ToggleButton = tk.Button(self.root, text='Toggle Helper', command=sendToggle)
         self.ToggleButton.pack()
 
@@ -59,6 +60,23 @@ class HELPER_GUI:
             self.conn.write("HELPERMASK,MAGNET\n".encode())
         self.MagnetMaskButton = tk.Button(self.root, text='Mask for Magnet', command=sendMagnetMask)
         self.MagnetMaskButton.pack()
+
+        def updateParameters():
+            self.conn.write('PAR{},{},{},{},{},{},{},{},{},{},{},{}\n'.format(
+            self.magnet_thresh_low.get(),
+            self.magnet_thresh_high.get(),
+            self.post_thresh_low.get(),
+            self.post_thresh_high.get(),
+            self.magnet_area_low.get(),
+            self.magnet_area_high.get(),
+            self.post_area_low.get(),
+            self.post_area_high.get(),
+            self.magnet_extent.get()*100,
+            self.magnet_aspectratio_low.get()*100,
+            self.magnet_aspectratio_high.get()*100,
+            self.post_circularity.get()*100).encode())
+        self.UpdateParametersButton = tk.Button(self.root, text='Update Algorithm w/\nAbove Parameters', command=updateParameters)
+        self.UpdateParametersButton.pack()
         
 
     def update(self):
@@ -76,20 +94,20 @@ class HELPER_GUI:
             self.magnet_aspectratio_high.get()*100,
             self.post_circularity.get()*100
             ).encode())
-        print('HELPER{},{},{},{},{},{},{},{},{},{},{},{}\n'.format(
-            self.magnet_thresh_low.get(),
-            self.magnet_thresh_high.get(),
-            self.post_thresh_low.get(),
-            self.post_thresh_high.get(),
-            self.magnet_area_low.get(),
-            self.magnet_area_high.get(),
-            self.post_area_low.get(),
-            self.post_area_high.get(),
-            self.magnet_extent.get()*100,
-            self.magnet_aspectratio_low.get()*100,
-            self.magnet_aspectratio_high.get()*100,
-            self.post_circularity.get()*100
-            ))
+        # print('HELPER{},{},{},{},{},{},{},{},{},{},{},{}\n'.format(
+        #     self.magnet_thresh_low.get(),
+        #     self.magnet_thresh_high.get(),
+        #     self.post_thresh_low.get(),
+        #     self.post_thresh_high.get(),
+        #     self.magnet_area_low.get(),
+        #     self.magnet_area_high.get(),
+        #     self.post_area_low.get(),
+        #     self.post_area_high.get(),
+        #     self.magnet_extent.get()*100,
+        #     self.magnet_aspectratio_low.get()*100,
+        #     self.magnet_aspectratio_high.get()*100,
+        #     self.post_circularity.get()*100
+        #     ))
         print(self.conn.readline().decode('utf-8')[:-2])
         self.conn.flush()
 
@@ -110,6 +128,7 @@ ser = EstablishConnection(serialports)
 if ser.ActiveSerial == True:
     root = tk.Tk()
     gui = HELPER_GUI(root, ser.conn)
+    ser.conn.write('HELPERTOGGLE\n'.encode())
 
 
 gui.run_update()

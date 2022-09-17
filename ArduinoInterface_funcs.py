@@ -15,8 +15,9 @@ class CS3D_GUI:
             self.conn = ser.conn
         self.t = 0
         self.activeMotor = 1
-        # self.WellLocations = [0, 3875, 7775, 11700]
+        self.WellLocations = [0, 3875, 7775, 11700]
         self.WellLocations = [0, 7775, 15550, 23325]
+        # self.WellLocations = [0, 7775, 15550, 60000]
         self.motorFrames = []
         self.moveToButtons = []
         self.positions, self.positionLabels = [], []
@@ -105,11 +106,11 @@ class CS3D_GUI:
             self.root.after(1)
             self.t0 = int(string.split(',')[1])
 
-        self.fig = Figure(figsize=(2,2))
-        self.ax = self.fig.add_subplot(111)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
-        self.canvas.draw()
-        self.canvas.get_tk_widget().place(relx=0.45, rely=0.6, relwidth=0.3, relheight=0.4)
+        # self.fig = Figure(figsize=(2,2))
+        # self.ax = self.fig.add_subplot(111)
+        # self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
+        # self.canvas.draw()
+        # self.canvas.get_tk_widget().place(relx=0.45, rely=0.6, relwidth=0.3, relheight=0.4)
         
 
     def readFromSerial(self):
@@ -118,7 +119,7 @@ class CS3D_GUI:
         if self.ser != None:
             string = self.conn.readline().decode('utf-8')[:-2]
             magic = string.split(',')[0]
-            self.conn.flush()
+            self.conn.flushInput()
         
         return string, magic
 
@@ -191,6 +192,7 @@ class CS3D_GUI:
             string = '1'
         else:
             string, magic = self.readFromSerial()
+            
             self.values = string.split(',')
             self.motorValues = []
             # print(self.values)
@@ -253,7 +255,8 @@ class CS3D_GUI:
             # print(string)
             # print("{}, {}".format(self.positions[self.cameraUnderWell-1].get(),self.stretch))
             # print(self.positions[0].get().split(': ')[1].split(' ')[0])
-            print(self.values)
+            print(self.cameraUnderWell)
+        self.conn.flush()
         self.root.after(1, self.update)
     
     

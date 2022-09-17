@@ -5,7 +5,7 @@
 #
 # Version: 2022_07_15
 
-from calendar import c
+
 import sensor, image, time, math, mjpeg
 import CuriBio_MV as cb
 import utime
@@ -22,8 +22,7 @@ thresholds = (245, 255)
 
 
 
-uart = UART(3, 9600, timeout = 25)
-uart.init(9600, timeout = 25)
+uart = cb.Serial(3, 9600, timeout=25)
 
 val = 0
 # Only blobs with more pixels than "pixel_threshold" and more area than "area_threshold" are
@@ -57,7 +56,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     nframes = 30*fps  # Process 30 seconds worth
 
     ROI_post = (0, 250, 160, 320) # x1, y1, x2, y2
-    ROI_magnet = (250, sensor.width(), 160, 320) # x1, y1, x2, y2
+    ROI_magnet = (250, 580, 160, 320) # x1, y1, x2, y2
     
     tracker = cb.PostAndMagnetTracker(fps, nframes, thresh_range, area_range, roi_post = ROI_post, roi_magnet = ROI_magnet)
 
@@ -87,7 +86,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     current_well = 1
     wellLabels = ['A','B','C','D']
     passive_length = [-1, -1, -1, -1]
-    plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
+    plotting_parameters = (centroid_m[current_well], centroid_p[current_well], milliseconds, time_of_max, value)
     passiveLengthCalcFlag = False
     passive_deflection = 0
 
@@ -117,77 +116,90 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     extra_fb.replace(sensor.snapshot())
     
     while True:
+        clock.tick()
         tic = utime.ticks_ms() - t0
-        # uart inputs: (1) INIT, (2) CHANGE, (3) POST - does not work, (4) THRESH - does not work
-        if uart.any():
-            val = uart.read()
-            #print(len(val))
-            #print(val)
-            #print(val.decode('utf-8'))
-            if len(val) > 4: # in case of bad input
-                val = val.decode('utf-8') # decode bytes into string
-                #if val[-3] != '#':
-                    #continue
-                val = val.split('#')[0] # split by occasional # at end
-                infos = val.split('&') # split based on incoming delimiter
-                print(infos)
+        if uart.simulationMode == False:
+            current_well, command, info = uart.read()
+            if command=='INIT':
+                initFlag[current_well] = True
+            elif command=='CHANGE':
+                pass # do nothing, well change happens during read function
+            elif command=='POSTMANUALTOGGLE':
+                postManualFlag = int(info[0])
+            elif command=='POSTMANUAL':
+                postManual = (int(info[0], int(info[1])))
+        else:
+            if isInit[current_well] == False: # if not currently initialized
+                initFlag[current_well] == True # trigger initialization
+            else:
+                initFlag[current_well] == False # hold low
 
-                current_well = int(infos[0]) # always starts with integer - well number
-                if infos[1] == 'INIT':
-                    initFlag[current_well-1] = True # flip initFlag high
-                elif infos[1] == 'POSTMANUALTOGGLE':
-                    postManualFlag = bool(int(infos[2]))
-                elif infos[1] == 'POSTMANUAL':
-                    postManual = (int(infos[2]), int(infos[3]))
-                elif infos[1] == 'CHANGE':
-                    pass # only thing this updates is the well number
-                elif infos[1] == 'POST':
-                    updatePostCentroid = True # flip flag for updating post centroid, (only graphical, does not change passive length)
-                elif infos[1] == 'THRESH':
-                    new_magnet_threshold = (int(infos[2]),int(infos[3])) # extract new magnet threshold
-                    updateMagnetThreshold = True # flip magnet threshold updater
-                elif infos[1] == 'HELPERTOGGLE':
-                    HELPERFLAG = int(infos[2]);
-                    helper_magnet_thresh = tracker.thresh_range[0]
-                    helper_post_thresh = tracker.thresh_range[1]
-                    helper_magnet_area = tracker.area_range[0]
-                    helper_post_area = tracker.area_range[1]
-                    helper_magnet_extent = 0.5
-                    helper_magnet_aspectratio = (0.9, 10)
-                    helper_post_circularity = 0.4
+        # current_well = int(infos[0])
+        # if uart.any():
+        #     val = uart.read()
+        #     #print(len(val))
+        #     #print(val)
+        #     #print(val.decode('utf-8'))
+        #     if len(val) > 4: # in case of bad input
+        #         val = val.decode('utf-8') # decode bytes into string
+        #         #if val[-3] != '#':
+        #             #continue
+        #         val = val.split('#')[0] # split by occasional # at end
+        #         infos = val.split('&') # split based on incoming delimiter
+        #         print(infos)
+
+        #         current_well = int(infos[0]) # always starts with integer - well number
+        #         if infos[1] == 'INIT':
+        #             initFlag[current_well] = True # flip initFlag high
+        #         elif infos[1] == 'POSTMANUALTOGGLE':
+        #             postManualFlag = bool(int(infos[2]))
+        #         elif infos[1] == 'POSTMANUAL':
+        #             postManual = (int(infos[2]), int(infos[3]))
+        #         elif infos[1] == 'CHANGE':
+        #             pass # only thing this updates is the well number
+        #         elif infos[1] == 'POST':
+        #             updatePostCentroid = True # flip flag for updating post centroid, (only graphical, does not change passive length)
+        #         elif infos[1] == 'THRESH':
+        #             new_magnet_threshold = (int(infos[2]),int(infos[3])) # extract new magnet threshold
+        #             updateMagnetThreshold = True # flip magnet threshold updater
+        #         elif infos[1] == 'HELPERTOGGLE':
+        #             HELPERFLAG = int(infos[2]);
+        #             helper_magnet_thresh = tracker.thresh_range[0]
+        #             helper_post_thresh = tracker.thresh_range[1]
+        #             helper_magnet_area = tracker.area_range[0]
+        #             helper_post_area = tracker.area_range[1]
+        #             helper_magnet_extent = 0.5
+        #             helper_magnet_aspectratio = (0.9, 10)
+        #             helper_post_circularity = 0.4
                     
-                elif infos[1] == 'HELPER':
-                    # get values here
-                    # 2-3: magnet threshold
-                    # 4-5: post threshold
-                    # 6-7: magnet area
-                    # 8-9: post area
-                    # 10: magnet extent
-                    # 11: magnet aspect ratio
-                    # 12: post circularity
-                    
-                    helper_magnet_thresh = (int(infos[2]), int(infos[3]))
-                    helper_post_thresh = (int(infos[4]), int(infos[5]))
-                    helper_magnet_area = (int(infos[6]), int(infos[7]))
-                    helper_post_area = (int(infos[8]), int(infos[9]))
-                    helper_magnet_extent = float(infos[10])/100
-                    helper_magnet_aspectratio = (float(infos[11])/100, float(infos[12])/100)
-                    helper_post_circularity = float(infos[13])/100
-                    
-                    
-                    
-                    pass
-                elif infos[1] == 'HELPERMASK':
-                    HELPERMASK = infos[2]
-                # placeholders fort future input options
-                elif infos[1] == 'POSTTHRESH':
-                    pass
-                elif infos[1] == 'POSTAREA':
-                    pass
-                elif infos[1] == 'MAGNETAREA':
-                    pass
-                elif infos[1] == 'POSTAREA':
-                    pass
+        #         elif infos[1] == 'HELPER':
+        #             # get values here
+        #             # 2-3: magnet threshold
+        #             # 4-5: post threshold
+        #             # 6-7: magnet area
+        #             # 8-9: post area
+        #             # 10: magnet extent
+        #             # 11: magnet aspect ratio
+        #             # 12: post circularity
+        #             helper_magnet_thresh = (int(infos[2]), int(infos[3]))
+        #             helper_post_thresh = (int(infos[4]), int(infos[5]))
+        #             helper_magnet_area = (int(infos[6]), int(infos[7]))
+        #             helper_post_area = (int(infos[8]), int(infos[9]))
+        #             helper_magnet_extent = float(infos[10])/100
+        #             helper_magnet_aspectratio = (float(infos[11])/100, float(infos[12])/100)
+        #             helper_post_circularity = float(infos[13])/100
+        #             pass
+        #         elif infos[1] == 'HELPERMASK':
+        #             HELPERMASK = infos[2]
+        #         # placeholders fort future input options
+        #         elif infos[1] == 'POSTTHRESH':
+        #             pass
+        #         elif infos[1] == 'POSTAREA':
+        #             pass
+        #         elif infos[1] == 'MAGNETAREA':
+        #             pass
+        #         elif infos[1] == 'POSTAREA':
+        #             pass
                 
         
         # First, query global stop/start input.  If high, do not do anything
@@ -311,49 +323,49 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             continue
             
             
-        if initFlag[current_well-1]:
+        if initFlag[current_well]:
             img = sensor.snapshot()
-            initFlag[current_well-1] = False # immediately flip low
+            initFlag[current_well] = False # immediately flip low
             tracker.passive_deflection = None # reset for initPassive function
             tracker.dist_neutral = None # reset for initPassive function
 
             stats_m = cb.locate_magnet(img, tracker.thresh_range, tracker.area_range, ROI_magnet, extent=0.7, aspectratio=(0.7, 2.0))
-            stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post)
+            stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post, circularity=0.5)
             if len(stats_m) == 0 or len(stats_p) == 0:
                 # run determine thresholds function to get new thresholds (needs more work to get more appropriate thresholds)
                 tracker.thresh_range, tracker.area_range = cb.determineThresholds(img, tracker.area_range, tracker.roi, tracker.roi_post, tracker.roi_magnet, visualize=False)
 
                 # get new stats
-                stats_m = cb.locate_magnet(img, tracker.thresh_range, tracker.area_range, ROI_magnet)
-                stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post)
+                stats_m = cb.locate_magnet(img, tracker.thresh_range, tracker.area_range, ROI_magnet, extent=0.7, aspectratio=(0.7, 2.0))
+                stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post, circularity=0.5)
                 print(tracker.thresh_range)
             
             # put stats through initPassive function to set passive length variables in tracker and in script
-            centroid_m_passive[current_well-1], centroid_p_passive[current_well-1] = tracker.initPassive(img, stats_m, stats_p, postManualFlag, postManual)
+            centroid_m_passive[current_well], centroid_p_passive[current_well] = tracker.initPassive(img, stats_m, stats_p, postManualFlag, postManual)
 
             # convert from numpy array to tuple for future use
-            centroid_p_passive[current_well-1] = tuple(list(centroid_p_passive[current_well-1]))
-            centroid_m_passive[current_well-1] = tuple(list(centroid_m_passive[current_well-1]))
+            centroid_p_passive[current_well] = tuple(list(centroid_p_passive[current_well]))
+            centroid_m_passive[current_well] = tuple(list(centroid_m_passive[current_well]))
 
             # extract passive length, thresholds, store for current well
-            passive_length[current_well-1] = tracker.dist_neutral # dist_neutral = passive_length
-            magnet_thresh[current_well-1] = tracker.thresh_range[0]
-            post_thresh[current_well-1] = tracker.thresh_range[1]
+            passive_length[current_well] = tracker.dist_neutral # dist_neutral = passive_length
+            magnet_thresh[current_well] = tracker.thresh_range[0]
+            post_thresh[current_well] = tracker.thresh_range[1]
             isInit[current_well - 1] = True # flip flag so that it runs through processImage now
 
             # output data to Arduino over Serial
-            outstring = "-43&{}&{}&{}&{}&{}&{}".format(tic, current_well, passive_length[current_well-1], magnet_thresh[current_well-1], post_thresh[current_well-1], centroid_p_passive[current_well-1])
+            outstring = "-43&{}&{}&{}&{}&{}&{}".format(tic, current_well+1, passive_length[current_well], magnet_thresh[current_well], post_thresh[current_well], centroid_p_passive[current_well])
 
-            print(outstring+','+str(frame_rate)) # print to IDE
+            #print(outstring+','+str(frame_rate)) # print to IDE
             uart.write(outstring+'\n') # send to Arduino
 
             continue
 
-        if isInit[current_well-1]:
+        if isInit[current_well]:
             img = sensor.snapshot()
-            if updateMagnetThreshold == True: # update magnet threshold with recieved range
-                updateMagnetThreshold = False
-                tracker.thresh_range = (new_magnet_threshold, tracker.thresh_range[1])
+            # if updateMagnetThreshold == True: # update magnet threshold with recieved range
+            #     updateMagnetThreshold = False
+            #     tracker.thresh_range = (new_magnet_threshold, tracker.thresh_range[1])
 
             # Modified processImage function, without plotting.  plotting_paramters might be duplicate of information already stored in tracker (or information that can be stored in tracker)
             value, plotting_parameters = tracker.processImage(img, tic, value, plotting_parameters, cb.PostAndMagnetTracker.computeStretch, postManualFlag, postManual)
@@ -364,10 +376,10 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             #  time (in milliseconds, not currently used)
             #  time_of_max (not currently used)
             #  value - duplicate of first output in processImage (not currently used)
-            centroid_m[current_well-1], centroid_p[current_well-1], milliseconds, time_of_max, dummy = plotting_parameters
+            centroid_m[current_well], centroid_p[current_well], milliseconds, time_of_max, dummy = plotting_parameters
 
             if updatePostCentroid == True:
-                centroid_p_passive[current_well-1] = centroid_p[current_well-1]
+                centroid_p_passive[current_well] = centroid_p[current_well]
                 updatePostCentroid = False
 
             # showTrackingOscilloscope takes in:
@@ -378,15 +390,15 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             #   time of max
             #   value - stretch, freq, last maximum
             #   well number
-            ret, rotated = tracker.showTrackingOscilloscope(img, centroid_m[current_well-1], centroid_p[current_well-1], milliseconds, time_of_max, value, current_well)
+            ret, rotated = tracker.showTrackingOscilloscope(img, centroid_m[current_well], centroid_p[current_well], milliseconds, time_of_max, value, current_well)
 
-            img.draw_circle(centroid_m_passive[current_well-1].cx(), centroid_m_passive[current_well-1].cy(), 10, color=255, fill=True)
-            img.draw_circle(centroid_p_passive[current_well-1].cx(), centroid_p_passive[current_well-1].cy(), 15, color=155, fill=True)
-            img.draw_line(centroid_p[current_well-1].cx(), centroid_p[current_well-1].cy(), centroid_m[current_well-1].cx(), centroid_m[current_well-1].cy(), color=0, thickness=2)
+            #img.draw_circle(centroid_m_passive[current_well].cx(), centroid_m_passive[current_well].cy(), 10, color=255, fill=True)
+            #img.draw_circle(centroid_p_passive[current_well].cx(), centroid_p_passive[current_well].cy(), 15, color=155, fill=True)
+            #img.draw_line(int(centroid_p[current_well][0]), int(centroid_p[current_well][1]), int(centroid_m[current_well][0]), int(centroid_m[current_well][1]), color=0, thickness=2)
             
             if ret != 0:
                 continue
-
+    
             if  len(value[0]) > 0 and len(value[1]) > 0:
                 stretch = value[0][-1]
                 freq = value[1][-1]
@@ -405,9 +417,9 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
                 max_stretch = 'Error'
                 
 
-            outstring =  "-35&{}&{}&{}".format(tic, round(stretch,3),current_well)
+            outstring =  "-35&{}&{}&{}".format(tic, round(stretch,3),current_well+1)
 
-            print(outstring+', '+str(tracker.thresh_range))
+            print(outstring+', '+str(tracker.thresh_range)+str(frame_rate))
             uart.write(outstring+'\n')
 
             toc = utime.ticks_ms() - t0
@@ -422,7 +434,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
         if (toc > tic):
             frame_rate = 1000.0/(toc-tic)
             tracker.setFps(frame_rate)  # Used to compute beat_frequency
-            print("Nothing happened, {}, {}, {}, {}".format(frame_rate, current_well, postManualFlag, postManual))
+            print("Nothing happened, {}, {}, {}, {}".format(frame_rate, current_well+1, postManualFlag, postManual))
 
 
 show_stretch_cytostretcher_MV(outfile=None)  # Use defaults
