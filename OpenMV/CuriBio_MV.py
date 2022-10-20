@@ -9,34 +9,37 @@ toggleButton = Pin('P7', Pin.IN, Pin.PULL_UP)  # Connected to pin 7
 green_led = LED(2)
 red_led   = LED(1)
 
-# import random
-
 class Serial:
     def __init__(self, pin, baudrate, timeout=25):
-        if pin==-1:
-            self.simulationMode=True
+        if pin == -1:
+            self.simulationMode = True
         else:
-            self.simulationMode=False
+            self.simulationMode = False
             self.uart = UART(pin, baudrate, timeout=timeout)
             self.uart.init(baudrate, timeout=timeout)
-
+    
     def read(self):
         val = ''
-        current_well, command, info = 0,'',[]
+        current_well, command, info = 0, '', []
+        #print('reading')
         val = self.uart.read()
         #print(val)
         if val is not None:
-            if len(val) > 4:
+            if len(val) > 4 and len(val) < 200:
+                print(len(val))
                 val = val.decode('utf-8')
+                
                 info = val.split('#')[0].split('&')
-                current_well = int(info.pop(0)) - 1
+                current_well = int(info.pop(0))
                 command = info.pop(0)
         return current_well, command, info
     
     def write(self, string):
-        self.uart.write(string+'\n')
+        if self.simulationMode == False:
+            self.uart.write(string+'\n')
 
-    
+# import random
+
 
 def eye():
     return np.array([[1.0, 0, 0, 0], [0, 1.0, 0, 0], [0, 0, 1.0, 0], [0, 0, 0, 1.0]])
@@ -47,66 +50,175 @@ def find_first(x):
     idx = x.view(bool).argmax() // x.itemsize
     return idx if x[idx] else -1
 
+
+class makehgtform:
+
+    def __init__(self, *args):
+        # args is a list
+        #  only the properties 'translate' and 'zrotate' are implemented
+        self.tform = eye()
+        if len(args) % 2 != 0:
+            raise RuntimeError("Non-even number of property-value pairs")
+
+        i = 0
+        while i < len(args):
+            key = args[i]
+            value = args[i + 1]
+            if key == "translate":
+                if len(value) == 3:
+                    T = eye()
+                    T[:3, 3] = value
+                    self.tform = np.dot(self.tform, T)
+                else:
+                    raise RuntimeError("translation value must be length 3")
+            elif key == "xrotate":
+                # Not implemented
+                raise RuntimeError("Not implemented")
+            elif key == "yrotate":
+                raise RuntimeError("Not implemented")
+            elif key == "zrotate":
+                # if len(value) == 1:
+                R = eye()
+                R[0, 0] = math.cos(value)  # value is in radians
+                R[0, 1] = -math.sin(value)
+                R[1, 0] = math.sin(value)
+                R[1, 1] = math.cos(value)
+                self.tform = np.dot(self.tform, R)
+                # else:
+                #     raise RuntimeError("zrotate value must be scalar")
+            elif key == "axisToRect":
+                # Value is (axis,rect) where axis is (xmin,xmax,ymin,ymax) and rect is (left,top,width,height)
+                # maps (xmin,ymax) to (left,top) and (xmax,ymin) to (left+width,top+height)
+                if len(value) == 2:
+                    axis = value[0]
+                    rect = value[1]
+                    T = eye()
+                    T[0, 0] = rect[2] / (axis[1] - axis[0])
+                    T[1, 1] = rect[3] / (axis[2] - axis[3])
+                    T[0, 3] = rect[0] - T[0, 0] * axis[0]
+                    T[1, 3] = rect[1] - T[1, 1] * axis[3]
+                    self.tform = np.dot(self.tform, T)
+                else:
+                    raise RuntimeError("coordMap value must be 2-tuple")
+            elif key == "coordMap":
+                if len(value) == 2:
+                    # Value is (old_coord,new_coord) where old_coord is (xmin,xmax,ymin,ymin)_old and
+                    #                                      new_coord is (xmin,xmax,ymin,ymax)_new.
+                    # Maps (xmin,ymax)_old to (xmin,ymax)_new  and (xmax,ymin)_old to (xmax,ymin)_new
+                    old_coord = value[0]
+                    new_coord = value[1]
+                    T = eye()
+                    T[0, 0] = (new_coord[1] - new_coord[0]) / (old_coord[1] - old_coord[0])
+                    T[1, 1] = (new_coord[3] - new_coord[2]) / (old_coord[3] - old_coord[2])
+                    T[0, 3] = new_coord[0] - T[0, 0] * old_coord[0]
+                    T[1, 3] = new_coord[2] - T[1, 1] * old_coord[2]
+                    self.tform = np.dot(self.tform, T)
+                else:
+                    raise RuntimeError("coordMap value must be 2-tuple")
+            else:
+                raise RuntimeError("Unknown key: " + key)
+            i += 2
+
+    def apply2D(self, xy):
+        # Apply transform to 2-D point (assumes xy is 2-by-n)
+        if len(xy.shape) > 1:
+            n = xy.shape[1]
+            # print("xy=", xy, " n=", n)
+            xyc = (xy, np.zeros((1, n)), np.ones((1, n)))
+            # print("xyc=", xyc)
+            # print(xyc[0].shape, xyc[1].shape, xyc[2].shape)
+            vec = np.dot(self.tform, np.concatenate(xyc, axis=0))
+        else:
+            # print("xy=", xy)
+            n = len(xy)
+            xyc = (xy, np.array([0,]), np.array([1,]))
+            # print("xyc=", xyc)
+            # print(xyc[0].shape, xyc[1].shape, xyc[2].shape)
+            # xyc_cat = np.concatenate(xyc, axis=0)
+            # print(xyc_cat)
+            vec = np.dot(self.tform, np.concatenate(xyc, axis=0).T)
+        # print("vec=",vec)
+        return vec[:2]
+
+    def apply3D(self, xyz):
+        # Apply transform to 3-D point
+        vec = np.dot(self.tform, np.concatenate((xyz, np.array([1,1])), axis=0))  # hstack forms 3-D homogeneous point
+        return vec[:3]
+
+    def transformRect(self, rect):
+        xy_min = self.apply2D(np.array((rect[0], rect[1]))).astype(int)
+        xy_max = self.apply2D(np.array((rect[0] + rect[2], rect[1] + rect[3]))).astype(int)
+        new_rect = (xy_min[0], xy_min[1], xy_max[0] - xy_min[0], xy_max[1] - xy_min[1])
+        return new_rect
+
+    def transformRowsCols(self, rows, cols):
+        # Transform row and column range vectors
+        xymin = self.apply2D(np.array((cols[0], rows[0]))).astype(int)
+        xymax = self.apply2D(np.array((cols[-1], rows[-1]))).astype(int)
+        new_rows = range(xymin[1], xymax[1])
+        new_cols = range(xymin[0], xymax[0])
+        return new_rows, new_cols
+
 class CircularBuffer:
     # Track values, resetting the signal after it reaches the end
     def __init__(self, buflen):
-        self.buffer = np.zeros((buflen,))
+        self.buffer = []
         self.buflen = buflen
-        self.count = 0
-        self.head = 0  # current end of buffer
-        self.bufstart = 0  # buffer epoch (cum index of signal[0])
-
-    def length(self):
-        if self.count < self.buflen:
-            return self.head
-        else:
-            return self.buflen
-
-    def last(self):
-        return self.buffer[self.head-1]
-
-    def maxlen(self):
-        return self.buflen
-
-    def buf_start(self):
-        # Cumulative index of buf[0]
-        return max(0, self.count - self.buflen)
-
+        
+        
+        #self.buffer = np.zeros((buflen,))
+        #self.buflen = buflen
+        #self.count = 0
+        #self.head = 0  # current end of buffer
+        #self.bufstart = 0  # buffer epoch (cum index of signal[0])
     def append(self, v):
-        if self.head == self.buflen:
-            self.head = 0  # Wrap around
-        self.buffer[self.head] = v
-        self.head += 1
-        self.count += 1
-
-    def count(self):
-        return self.count # Total count
-
-    def signal(self) -> np.array:
-        if self.count > self.buflen:
-            first_part = self.buffer[self.head+1:]
-            second_part = self.buffer[:self.head]
-            return np.concatenate((first_part, second_part), axis=0)
-        else:
-            return self.buffer[:self.head]
-
-# Here I am:  Need more of these methods updated to be used by the circular buffer
-
-    def reset(self):
-        self.head = 0
-        self.count = 0
-        self.bufstart = 0
+        self.buffer.append(v) # append to list
+        if len(self.buffer) > self.buflen: # if the new list is too large
+            self.buffer.pop(0) # remove the first number from the list
+    def signal(self):
+        return self.buffer
+    #def length(self):
+        #if self.count < self.buflen:
+            #return self.head
+        #else:
+            #return self.buflen
+    #def last(self):
+        #return self.buffer[self.head-1]
+    #def maxlen(self):
+        #return self.buflen
+    #def buf_start(self):
+        ## Cumulative index of buf[0]
+        #return max(0, self.count - self.buflen)
+    #def append(self, v):
+        #if self.head == self.buflen:
+            #self.head = 0  # Wrap around
+        #self.buffer[self.head] = v
+        #self.head += 1
+        #self.count += 1
+    #def count(self):
+        #return self.count # Total count
+    #def signal(self) -> np.array:
+        #if self.count > self.buflen:
+            #first_part = self.buffer[self.head+1:]
+            #second_part = self.buffer[:self.head]
+            #return np.concatenate((first_part, second_part), axis=0)
+        #else:
+            #return self.buffer[:self.head]
+    #def reset(self):
+        #self.head = 0
+        #self.count = 0
+        #self.bufstart = 0
 
 
 class MaxTracker:
     """ Track the index of maximum values in a signal
     """
 
-    def __init__(self, buflen):
+    def __init__(self, buflen, CircularBufferSize):
         self.tracker = CircularBuffer(buflen)  # List of v
         self.milliseconds = CircularBuffer(buflen) # List of t
-        self.maxes = CircularBuffer(20)  # List of last few v at max in signal
-        self.max_times = CircularBuffer(20) # List of last few t at max in signal
+        self.maxes = CircularBuffer(CircularBufferSize)  # List of last few v at max in signal
+        self.max_times = CircularBuffer(CircularBufferSize) # List of last few t at max in signal
 
         self.max_signal = None # remember last max signal
         self.update_max = False
@@ -124,13 +236,9 @@ class MaxTracker:
         self.hysteresis = 0.8
         self.count = -1  # Number of values processed
         self.last_20 = [] # Last 20 signal values (used to apply hysteresis-based max finding)
-
-    def process_without_max(self, t, v) -> int:
-        direction = 0
-        self.count += 1
-        self.milliseconds.append(t)
-        self.tracker.append(v)
-        return direction
+        
+        self.direction = 0
+        self.foundMax = 0
 
     def process(self, t, v) -> int:
         """ Process time and signal value while looking for maximums
@@ -141,8 +249,9 @@ class MaxTracker:
                    or 0 otherwise
         """
         direction = 0
+        self.direction = 0
         self.count += 1
-
+        
         # track Signal
         self.milliseconds.append(t)
         self.tracker.append(v)
@@ -164,13 +273,13 @@ class MaxTracker:
         i = self.count
         if i > 4 and self.update_max and v > self.last_max:
             # Found a higher max
-            self.last_max = v
+            self.last_max = round(v)
             self.last_tmax = t
 
         # Follow min down
         if i > 4 and not self.update_max and v < self.last_min:
             # Found a lower min
-            self.last_min = v
+            self.last_min = round(v)
             self.last_tmin = t
 
         if self.update_max and v < self.last_max - self.hysteresis and t > self.last_tmin + self.min_dt:
@@ -185,15 +294,19 @@ class MaxTracker:
             # max_twitch = self.last_max
 
             # a new max verified so add to list of argmax's
-            if self.maxes.length() == 0 or self.max_times.signal()[-1] != self.last_tmax:
+            if len(self.maxes.signal()) == 0 or self.max_times.signal()[-1] != self.last_tmax:
                 # print('max verified at t=', self.last_tmax)
-                self.max_times.append(self.last_tmax)
-                self.maxes.append(self.last_max)
-                self.max_signal = self.last_max  # Remember last maximum signal
+                if self.last_max > 3: # make sure maximums are greater than 3 pixels
+                    self.max_times.append(self.last_tmax)
+                    self.maxes.append(round(self.last_max))
+                    self.max_signal = round(self.last_max)  # Remember last maximum signal
+                    self.foundMax = 1
             self.last_min = self.last_max
             self.last_tmin = self.last_tmax
             self.update_max = False  # Now looking for min
+            
             direction = +1  # max detected
+            self.direction = 1
 
         elif not self.update_max and v > self.last_min + self.hysteresis:
             # Update hysteresis dynamically (but slowly)
@@ -212,6 +325,7 @@ class MaxTracker:
             self.last_tmax = self.last_tmin
             self.update_max = True  # Now looking for max
             direction = -1  # min detected
+            self.direction = -1
 
         return direction
 
@@ -282,8 +396,9 @@ class CircularSignalTracker:
 
 
 class PostAndMagnetTracker:
+
     # added more initialization parameters
-    def __init__(self, fps, nframes, thresh_range, area_range, roi_post, roi_magnet, roi=(72, 420, 199, 270)):
+    def __init__(self, fps, nframes, thresh_range, area_range, roi_post, roi_magnet, roi=(72, 420, 199, 270), CircularBufferSize=10):
         """ PostAndMagnetTracker Constructor
 
         tracker = PostAndMagnetTracker(thresh_range,area_range)
@@ -293,7 +408,7 @@ class PostAndMagnetTracker:
         :param roi is a 4 element tuple (xmin,xmax,ymin,ymax)
         """
         frames_to_plot = 200
-        self.maxTracker = MaxTracker(frames_to_plot)
+        self.maxTracker = MaxTracker(frames_to_plot, CircularBufferSize)
         self.fps = fps
         self.nframes = nframes
         self.thresh_range = thresh_range
@@ -304,8 +419,7 @@ class PostAndMagnetTracker:
         self.aspectratio = (0.5, 2.0)
         self.circularity = 0.5
         self.roi = (0,sensor.width(), 0, sensor.height())
-        
-        self.extra_print_string = ''
+
 
         self.wait_until = 0
         self.millisecs = frames_to_plot / fps * 1000 # Max number of milliseconds to plot
@@ -318,6 +432,7 @@ class PostAndMagnetTracker:
         self.spring_constant = 0.159
 
         self.automatic_thresh = False  # Automatically determine the thresholds
+        self.stats_m = None
 
         # Lazily initialized when first image is processed
         self.passive_deflection = None  # deflection in pixels
@@ -327,6 +442,7 @@ class PostAndMagnetTracker:
         self.trans = None  # Rotation transform
         self.post_centroid = None
         self.twitch_deflection = 0
+
         # Lazily initialized title and oscilloscope areas
         self.zoom_rect = None
         self.title_rect = None
@@ -334,8 +450,7 @@ class PostAndMagnetTracker:
         self.axes_rect = None
         self.rows = None
         self.cols = None
-        
-        self.stats_m = None
+
         # Lazily initialized title and oscilloscope areas
         self.zoom_rect_bigger = None
         self.title_rect_bigger = None
@@ -345,6 +460,12 @@ class PostAndMagnetTracker:
 
         self.ylim_left  = [10000.0,-10000.0]  # Outside expected range
         self.ylim_right = [10000.0,-10000.0]  # Outside expected range
+        
+        self.last_max_array = []
+        self.sizeROIx = 100
+        self.sizeROIy = 200
+        self.sizeStats = 20
+        self.smudgeFactor = 1.25
 
     def setFps(self, fps):
         self.fps = fps
@@ -369,12 +490,13 @@ class PostAndMagnetTracker:
         width = sensor.width()
         print(stats_m)
         print(stats_p)
-        
         self.automatic_thresh = False
+
         if len(stats_m) == 0:
-            centroid_m = np.array((0, 0))
+            centroid_m = np.array((0,0))
         else:
             centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
+        
         if postManualFlag:
             centroid_p = np.array(postManual)
         else:
@@ -382,8 +504,8 @@ class PostAndMagnetTracker:
                 centroid_p = np.array(postManual)
             else:
                 centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
-        if postManualFlag:
-            centroid_p = np.array(postManual)
+
+        
         dx = centroid_m[0] - centroid_p[0]
         dy = centroid_m[1] - centroid_p[1]
 
@@ -429,31 +551,33 @@ class PostAndMagnetTracker:
             self.zoom_rect = (min_col, min_row, max_col - min_col, max_row - min_row)
 
             # Remember post centroid.  Comment this out to compute the post centroid each time
-            # self.post_centroid = stats_p
+            
             if postManualFlag:
                 self.post_centroid = postManual
             else:
                 self.post_centroid = (stats_p[0].cx(), stats_p[0].cy())
+            
 
             # Determine location of title rect
-            # self.title_rect = (min_col, max(min_row - title_height, 0), max_col - min_col, title_height)
             self.title_rect = (0, 0, sensor.width(), 80)
 
-            # Determine location of oscilloscope rect
-            oscilloscope_height = max(height - max_row, 120)
-            self.oscilloscope_rect = (min_col, min(max_row, height-oscilloscope_height), max_col - min_col, oscilloscope_height)
+            self.stats_m = stats_m
 
-            # Determine location of axes_rect
-            self.axes_rect = (min_col + left_padding,
-                              self.oscilloscope_rect[1] + top_padding,
-                              max_col - min_col - left_padding - right_padding,
-                              oscilloscope_height - top_padding - bottom_padding)
+            # # Determine location of oscilloscope rect
+            # oscilloscope_height = max(height - max_row, 120)
+            # self.oscilloscope_rect = (min_col, min(max_row, height-oscilloscope_height), max_col - min_col, oscilloscope_height)
 
-            # Selection rectangle within image (includes title and oscilloscope areas)
-            # print("min_row=",min_row," title_height=",title_height)
-            # print("max_row=",max_row," oscil_height=",oscilloscope_height)
-            self.rows = range(min_row - title_height, max_row + oscilloscope_height)
-            self.cols = range(min_col, max_col)
+            # # Determine location of axes_rect
+            # self.axes_rect = (min_col + left_padding,
+            #                   self.oscilloscope_rect[1] + top_padding,
+            #                   max_col - min_col - left_padding - right_padding,
+            #                   oscilloscope_height - top_padding - bottom_padding)
+
+            # # Selection rectangle within image (includes title and oscilloscope areas)
+            # # print("min_row=",min_row," title_height=",title_height)
+            # # print("max_row=",max_row," oscil_height=",oscilloscope_height)
+            # self.rows = range(min_row - title_height, max_row + oscilloscope_height)
+            # self.cols = range(min_col, max_col)
         return centroid_m, centroid_p # added return values
 
     def computeStretch(self, displacement, maximums):
@@ -605,13 +729,12 @@ class PostAndMagnetTracker:
         time_of_max = tracker.time_of_maximums() # in milliseconds
         if time_of_max is not None:
             if len(time_of_max) > 1:
-                last_max_percent = tracker.last_max_signal() / self.dist_neutral * 100
+                last_max_percent = [tracker.maxes.signal()[-1] / self.dist_neutral * 100]
+                
                 # Compute beat frequency from signal
-                if np.any(np.diff(time_of_max) == 0):
-                    print('Got zero')
-
+                
                 # Estimate frequency of maximums
-                f = 1000.0 / np.diff(time_of_max)
+                f = 1000.0 / np.diff(np.array(time_of_max))
                 # f = np.zeros((len(maximums)-1))
                 # for m in range(1,len(maximums)):
                 #     m0 = int(maximums[m-1])
@@ -632,77 +755,77 @@ class PostAndMagnetTracker:
         twitch_tension = self.spring_constant * displacement * self.microns_per_pixel
         return passive_tension, twitch_tension
 
-    def processImage(self, img, capture_time_ms, value, plotting_parameters, func, postManualFlag, postManual):
-        old_plotting_parameters = plotting_parameters
-        
-        magnet_prev_pixel_val = img.get_pixel(int(old_plotting_parameters[0][0]), int(old_plotting_parameters[0][1]))
+    def processImage(self, img, capture_time_ms, value, func, postManualFlag, postManual):
+
         old_values = value
         # Locate magnet and post
         width = sensor.width()
         height = sensor.height()
-        #self.thresh_range = ((0,magnet_prev_pixel_val),self.thresh_range[1])
-        
-        # Return statistics for the magnet and post (if found)
+
         if self.stats_m == None:
-            img.draw_rectangle(self.roi_magnet[0], self.roi_magnet[1], self.roi_magnet[2]-self.roi_magnet[0], self.roi_magnet[3]-self.roi_magnet[1],color=255, thickness=2)
+            self.roi_magnet = (330, 585, 188, 344)
             stats_m = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet, self.aspectratio, self.extent)
             self.stats_m = stats_m
         elif len(self.stats_m) == 0:
-            img.draw_rectangle(self.roi_magnet[0], self.roi_magnet[1], self.roi_magnet[2]-self.roi_magnet[0], self.roi_magnet[3]-self.roi_magnet[1],color=255, thickness=2)
+            self.roi_magnet = (330, 585, 188, 344)
             stats_m = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet, self.aspectratio, self.extent)
             self.stats_m = stats_m
         else:
-            #print(self.stats_m)
             bbox = self.stats_m[0].rect()
-            #print(bbox)            
-            #utime.sleep_ms(1000)
-
-            mag_roi = (bbox[0]-100, bbox[0]+bbox[2]+100, bbox[1]-100, bbox[1]+bbox[3]+100)
-            #print(mag_roi)
-            s = img.get_statistics(roi=bbox)
-            mag_thresh = (0,s.max())
+            mag_roi = (self.stats_m[0].cx()-int(self.sizeROIy/2), self.stats_m[0].cx()+int(self.sizeROIy/2), self.stats_m[0].cy()-int(self.sizeROIx/2), self.stats_m[0].cy()+int(self.sizeROIx/2))
+            
+            self.s = img.get_statistics(roi=[self.stats_m[0].cx()-int(self.sizeStats/2), self.stats_m[0].cy()-int(self.sizeStats/2), self.sizeStats,self.sizeStats])
+            # mag_thresh = (0,int(self.s.max()*1.25))
+            new_thresh = int(self.s.max()*self.smudgeFactor)
+            
+            # self.s_m = img.get_statistics(roi=bbox)
+            if new_thresh < self.thresh_range[0][1]-1:
+                mag_thresh = (0, self.thresh_range[0][1]-1)
+            elif new_thresh > self.thresh_range[0][1]+1:
+                mag_thresh = (0, self.thresh_range[0][1]+1)
+            else:
+                mag_thresh = (0, self.thresh_range[0][1])
+                
+            self.thresh_range = (mag_thresh, self.thresh_range[1])
             img.draw_rectangle(mag_roi[0],mag_roi[2],mag_roi[1]-mag_roi[0],mag_roi[3]-mag_roi[2],color=255, thickness=2)
-            img.draw_rectangle(bbox[0], bbox[1],bbox[2],bbox[3], color=155, fill=True)
-            #print(mag_roi)
-            print("mean:{}, median:{}, mode:{}, stdev:{}, min:{}, max:{}, thresh:{}, stats:{}".format(s[0], s[1], s[2], s[3], s[4], s[5], self.thresh_range[0][1], self.stats_m))
-            stats_m = locate_magnet(img, (self.thresh_range[0], self.thresh_range[1]), self.area_range, mag_roi, self.aspectratio, self.extent)
-            #stats_m = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet, self.aspectratio, self.extent)
-            self.stats_m = stats_m
-            self.mag_roi = mag_roi
             
-            #print(stats_m)
+            stats_m = locate_magnet(img, self.thresh_range, self.area_range, mag_roi, self.aspectratio, self.extent)
+            bbox = self.stats_m[0].rect()
+            img.draw_rectangle(bbox[0], bbox[1], bbox[2], bbox[3], color=155, thickness=2)
             
-        if len(stats_m) > 0:
+            # BACKUP MAGNET TRACKER
+            self.roi_magnet = (330, 585, 188, 344)
+            stats_m_backup = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet, self.aspectratio, self.extent)
+            
+            
+            
+        if stats_m == None:
+            centroid_m = np.array((self.stats_m[0].cx(), self.stats_m[0].cy()))
+        elif len(stats_m) > 0:
             stats_m = [stats_m[0]]
-            centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
-            #img.draw_rectangle(stats_m[0].rect()[0],stats_m[0].rect()[1],stats_m[0].rect()[2],stats_m[0].rect()[3], color=255, thickness=1, fill=False)
-        
+            self.stats_m = [stats_m[0]]
+            self.centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
         elif len(stats_m) == 0:
-            centroid_m = np.array(old_plotting_parameters[0])
-            #self.extra_print_string += "No Magnet Centroid"
-        elif stats_m == None:
-            centroid_m = np.array(old_plotting_parameters[0])
-            #self.extra_print_string += "None Magnet Centroid"
+            centroid_m = np.array((self.stats_m[0].cx(), self.stats_m[0].cy()))
         
-        #if self.post_centroid is None:
+        
         if postManualFlag:
             stats_p = None
-            centroid_p = postManual
+            self.centroid_p = np.array(postManual)
         else:
             stats_p = locate_post(img, self.thresh_range, self.area_range, self.roi_post, self.circularity)
             # Choose best one
-            if len(stats_p) > 0:
+            if len(stats_p) > 0: # if found a blob, update centroid tracker
                 stats_p = [stats_p[0]]  # Choose best one
-                centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
-                
+                self.centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
             elif len(stats_p) == 0:
-                centroid_p = np.array(old_plotting_parameters[1])
+                centroid_p = np.array(postManual)
                 #self.extra_print_string += ", No Post Centroid"
             elif stats_p == None:
-                centroid_p = np.array(old_plotting_parameters[1])
+                centroid_p = np.array(postManual)
                 #self.extra_print_string += ", None Post Centroid"
-            
-        dist_current = np.linalg.norm(centroid_m - centroid_p)
+        
+        dist_current = np.linalg.norm(self.centroid_m - self.centroid_p)
         twitch_deflection = dist_current - self.dist_neutral
         self.twitch_deflection = twitch_deflection
         # print('twitch deflection=', twitch_deflection)
@@ -713,7 +836,6 @@ class PostAndMagnetTracker:
         
         milliseconds = self.maxTracker.time()
         time_of_max = self.maxTracker.time_of_maximums()
-        plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
         #centroid_m, centroid_p, milliseconds, time_of_max, value = plotting_parameters
         #ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
         #plotting_parameters = (centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
@@ -725,73 +847,20 @@ class PostAndMagnetTracker:
                 
                 x,y,w,h = stat.rect()
                 img.draw_rectangle(x,y,w,h,color=(255,255,0), thickness=4)
+        #print([100*i/self.dist_neutral for i in self.maxTracker.maxes.signal()])
+        return value
         
-        return value, plotting_parameters
-            
-        # First time through, set the passive deflection (in pixels)
-        # Also set the zoom in ranges and the rotation transform
-
-        # First time through or until first max (within first two seconds)
-        # if self.passive_deflection is None or (len(self.maxTracker.maximums()) < 1 and capture_time_ms < self.wait_until):
-        #     self.initPassive(img, stats_m, stats_p)
-        #     if self.passive_deflection is None:
-        #         self.wait_until = capture_time_ms + 2000
-
-        # centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
-        # centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
-
-        # dist_current = np.linalg.norm(centroid_m - centroid_p)
-        # dist_current = distance.euclidean(centroid_m, centroid_p)  # In pixels
-        # twitch_deflection = dist_current - self.dist_neutral
-        # print('twitch deflection=', twitch_deflection)
-
-        # Track the capture time, deflection and max
-        # self.maxTracker.process(capture_time_ms, twitch_deflection)
-
-        # Compute the application-specific value
-        # maximums = self.maxTracker
-        # displacement = self.maxTracker
-        # value = func(self, self.maxTracker)  # returns (stretch_percent, freq at max, last max stretch percent
-
-        # # Early return (no plotting)
-        # return 0, [], value
-
-        # # Return with centroid tracking indicators
-        # ret = self.showTracking(img, centroid_m, centroid_p)
-        # return ret, img, value
-
-        # Return with oscilloscope plotting
-        milliseconds = self.maxTracker.time()
-        time_of_max = self.maxTracker.time_of_maximums()
-        maximums = self.maxTracker.maximums()
-        centroid_m = (stats_m[0].cx(), stats_m[0].cy())
-        if postManualFlag:
-            centroid_p = postManual
-        else:
-            centroid_p = (stats_p[0].cx(), stats_p[0].cy())
-
-        plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
-        #print(plotting_parameters)
-        #ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, milliseconds, time_of_max, value)
-        #outputs = (passiveLengthCalcFlag, self.dist_neutral, self.passive_deflection)
-        if not postManualFlag:
-            for stat in stats_p:
-                x,y,r = stat.enclosing_circle()
-                
-                img.draw_circle(x,y,r,color=(0,255,0), thickness=2)
-                
-                x,y,w,h = stat.rect()
-                img.draw_rectangle(x,y,w,h,color=(255,255,0), thickness=4)
-        return value, plotting_parameters
-
+        
         # ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p,
         #                                                milliseconds, time_of_max, value)
         # return ret, annotated, value
 
-    def showTrackingOscilloscope(self, img, centroid_m, centroid_p, milliseconds, time_of_max, value, current_well):
+    def showTrackingOscilloscope(self, img, value, current_well):
         # Highlight the location of the magnet and post centroids
         # Show plot of value as a function of milliseconds
         # maximums is the same length as value[1]
+
+        well_labels = ['D','C','B','A']
 
         width = sensor.width()
         height = sensor.height()
@@ -804,12 +873,20 @@ class PostAndMagnetTracker:
         # img.draw_rectangle(self.axes_rect, color=255, thickness=2)
 
         # Draw centroid in image
-        ret = self.showTracking(img, centroid_m, centroid_p)
+        ret = self.showTracking(img, self.centroid_m, self.centroid_p)
 
         # Plot the signal like an oscilloscope = some function of twitch_deflection and max
         if len(value) > 0:
             stretch = value[0]  # From computeStretchFrequency
             beat_freq = value[1]  # From computeStretchFrequency
+            max_stretch = value[2]
+
+            
+            if current_well < 4 and current_well >= 0:
+                well_row = well_labels[current_well]
+            else:
+                well_row = 'Error'
+            
             # signal_offset = self.maxTracker.signal_offset()
 
             # Plot signal and beat freq in oscilloscope area
@@ -836,22 +913,19 @@ class PostAndMagnetTracker:
             #     # Plot stretch in oscilloscope area
             #     self.plot(img, self.axes_rect, milliseconds, stretch, 127, '-', 1, 0)
 
-            if current_well == 1:
-                well_row = 'A'
-            elif current_well == 2:
-                well_row = 'B'
-            elif current_well == 3:
-                well_row = 'C'
-            elif current_well == 4:
-                well_row = 'D'
-            else:
-                well_row = 'E' # defaults to something it can't be, in case there's a faulty value
-            
             # Determine title
-                
             title = "Row {}".format(well_row)
-            title += "     {} s".format(round(milliseconds[-1]/1000,1))
+            title += " / {} s".format(round(self.maxTracker.time()[-1]/1000,1))
             title += "\nStretch: %4.2f%%" % stretch[-1]
+            if len(max_stretch) == 0:
+                title += " / Max Stretch: []"
+                title += " / Thresh: {} ".format(self.thresh_range[0][1])
+            else:
+                title += " / Max Stretch: %4.1f%%" % max_stretch[-1]
+                title += " / Thresh: {} ".format(self.thresh_range[0][1])
+                
+                title += " \nMax Stretch: {}".format([100*i/self.dist_neutral for i in list(self.maxTracker.maxes.signal())])
+            
             #if len(beat_freq) > 0:
                 #title = title + ("\nBeat freq: %.2f Hz" % beat_freq[-1])
 
@@ -955,14 +1029,14 @@ class PostAndMagnetTracker:
         # Draw centroid
         img.draw_circle(int(centroid_m[0]), int(centroid_m[1]), 5, color=200, fill=True)  # marker
         img.draw_circle(int(centroid_p[0]), int(centroid_p[1]), 10, color=127, fill=True)  # marker
-        
+
         return 0
 
 def nonzero(x):
     # Return positional argument of the nonzero elements
     nz = []
     for i in range(0,len(x)):
-        if int(x[i]) != 0:
+        if x[i] != 0:
             nz.append(i)
 
     return nz
@@ -982,17 +1056,11 @@ def nonzero_runs(y):
 
     # Find the beginning index of constant runs within boolean array y and associated runlen
     dy = np.diff(yaug)
-    print([i for i in dy])
-    print([i for i in dy > 0])
-    print([i for i in dy < 0])
-    
     run_begin = nonzero(dy > 0)
     run_end = nonzero(dy < 0)
     # print("run_begin=",run_begin)
     # print("run_end=",run_end)
     # if run_begin is not None and run_end is not None:
-    print(run_begin)
-    print(run_end)
     runlen = np.array(run_end) - np.array(run_begin)
     # print("run_len=", runlen)
     # else:
@@ -1032,8 +1100,8 @@ def determineThresholds(img, area_range, roi, roi_post, roi_magnet, visualize=Fa
         # Get all blobs
         if visualize:
             print("i = %d" % i, end=': ')
-        stats_m = locate_magnet(img, thresholds, area_range, roi_magnet, aspectratio = (0.5, 2.0), extent=0.5)
-        stats_p = locate_post(img, thresholds, area_range, roi_post, circularity = 0.5)
+        stats_m = locate_magnet(img, thresholds, area_range, roi_magnet, aspectratio = (0.5, 2.0), extent = 0.5)
+        stats_p = locate_post(img, thresholds, area_range, roi_post, circularity=0.5)
         # stats_m, stats_p = locate_magnet_and_post(img, thresholds, area_range, roi)
         data.append((i, len(stats_m), len(stats_p)))  # Remember number of blobs detected
         if visualize:
@@ -1062,7 +1130,7 @@ def determineThresholds(img, area_range, roi, roi_post, roi_magnet, visualize=Fa
         thresh_m = [0, int(r[idx_m] + runlen_m[runmax_m] // 2)]
         # print("thresh_m=", thresh_m)
     else:
-        thresh_m = (0,70)
+        thresh_m = None
         idx_m = None
 
     # Determine runs for post
@@ -1077,7 +1145,7 @@ def determineThresholds(img, area_range, roi, roi_post, roi_magnet, visualize=Fa
         idx_p = runs_p[0][runmax_p]
         thresh_p = (0, int(r[idx_p] + runlen_p[runmax_p] // 2))
     else:
-        thresh_p = (0,10)
+        thresh_p = None
         idx_p = None
 
     if visualize:
@@ -1220,20 +1288,14 @@ def FilterByExtent(stats, e) -> []:
 def FilterByAspectRatio(stats, ar) -> []:
     good = []
     for props in stats:
-        
         aspect_ratio = getAspectRatio(props)
-        # modified to optionally accept upper and lower bounds of acceptable aspect ratios
-        if len(ar) == 1:
-            if aspect_ratio >= ar:
-                good.append(props)
-        elif len(ar) == 2:
-            if aspect_ratio >= ar[0] and aspect_ratio <= ar[1]:
-                good.append(props)
+        if aspect_ratio >= ar[0] and aspect_ratio <= ar[1]:
+            good.append(props)
 
     return good
 
 
-def FilterByCircularity(stats, circ, ar_range=(0.7, 1.3)) -> []:
+def FilterByCircularity(stats, circ, ar_range=(0.9, 1.1)) -> []:
     good = []
     for props in stats:
         # Expect circular blobs to be bounded by a "square" and high circularity
@@ -1319,41 +1381,40 @@ def ShowLabelImage(bw):
 def VisualizeThresholdSearch(img, thresh, stats_m, stats_p):
     # Show image with blobs detected as movie
         # Assume the image is grayscale
-        #img_copy = img.copy(copy_to_fb=True) # These lines place the
-        img = img.binary([(0,thresh)])   # bw into the frame buffer
-        img = img.to_rainbow()
-        
-        
+        img_copy = img.copy(copy_to_fb=True) # These lines place the
+        bw = img_copy.binary([(0,thresh)])   # bw into the frame buffer
+        bw = bw.to_rainbow()
+
         for blob in stats_m:
-            img.draw_circle(blob.cx(), blob.cy(), 5, color=30, fill=True)  # marker
+            bw.draw_circle(blob.cx(), blob.cy(), 5, color=30, fill=True)  # marker
             if blob.elongation() < 0.5:
-                img.draw_edges(blob.min_corners(), color=30)
-                img.draw_line(blob.major_axis_line(), color=30)
-                img.draw_line(blob.minor_axis_line(), color=30)
+                bw.draw_edges(blob.min_corners(), color=30)
+                bw.draw_line(blob.major_axis_line(), color=30)
+                bw.draw_line(blob.minor_axis_line(), color=30)
             # These values are stable all the time.
-            img.draw_rectangle(blob.rect(), color=30)
-            img.draw_cross(blob.cx(), blob.cy(), color=30)
+            bw.draw_rectangle(blob.rect(), color=30)
+            bw.draw_cross(blob.cx(), blob.cy(), color=30)
             # Note - the blob rotation is unique to 0-180 only.
-            # img.draw_keypoints([(blob.cx(), blob.cy(), int(blob.rotation_deg()))], size=40, color=127)
+            # bw.draw_keypoints([(blob.cx(), blob.cy(), int(blob.rotation_deg()))], size=40, color=127)
 
         for blob in stats_p:
-            img.draw_circle(blob.cx(), blob.cy(), 5, color=10, fill=True)  # marker
+            bw.draw_circle(blob.cx(), blob.cy(), 5, color=10, fill=True)  # marker
             if blob.elongation() < 0.5:
-                img.draw_edges(blob.min_corners(), color=10)
-                img.draw_line(blob.major_axis_line(), color=10)
-                img.draw_line(blob.minor_axis_line(), color=10)
+                bw.draw_edges(blob.min_corners(), color=10)
+                bw.draw_line(blob.major_axis_line(), color=10)
+                bw.draw_line(blob.minor_axis_line(), color=10)
             # These values are stable all the time.
-            # img.draw_rectangle(blob.rect(), color=127)
-            img.draw_cross(blob.cx(), blob.cy(), color=10)
+            # bw.draw_rectangle(blob.rect(), color=127)
+            bw.draw_cross(blob.cx(), blob.cy(), color=10)
             circ = blob.enclosing_circle()
-            img.draw_circle(circ[0], circ[1], circ[2], color=10)
+            bw.draw_circle(circ[0], circ[1], circ[2], color=10)
             # Note - the blob rotation is unique to 0-180 only.
-            # img.draw_keypoints([(blob.cx(), blob.cy(), int(blob.rotation_deg()))], size=40, color=127)
+            # bw.draw_keypoints([(blob.cx(), blob.cy(), int(blob.rotation_deg()))], size=40, color=127)
 
-        img.draw_string(20, 20, "%d" % thresh, scale=3, color=100, mono_space=False)  # Show the threshold
-        utime.sleep_ms(100)
+        bw.draw_string(20, 20, "%d" % thresh, scale=3, color=100, mono_space=False)  # Show the threshold
+        utime.sleep_ms(200)
 
-def locate_magnet(img, thresh_range, area_range, roi=(0,0,sensor.width(), sensor.height()), aspectratio = (0.9,10), extent = 0.6) -> ({}, {}):
+def locate_magnet(img, thresh_range, area_range, roi=(0,0,sensor.width(), sensor.height()), aspectratio = (0.5,10), extent = 0.6) -> ({}, {}):
     height = sensor.height()
     width = sensor.width()
 
@@ -1371,6 +1432,7 @@ def locate_magnet(img, thresh_range, area_range, roi=(0,0,sensor.width(), sensor
     # magnet detector (assume sensor is already grayscale)
     #
     # print("thresh_range=", thresh_range)
+    #print(roi)
     stats_m = img.find_blobs( [thresh_range[0]], pixels_threshold=area_range[0][0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]))
     
     #print(stats_m)
@@ -1452,3 +1514,95 @@ def locate_post(img, thresh_range, area_range, roi, circularity=0.5) -> ({}, {})
     stats_p = OrderByCircularity(stats_p)
 
     return stats_p
+
+
+
+
+def HelperFunction(img, thresh, area, ROI, ar, extent, circularity, MASK):
+    stats_m = locate_magnet(img, thresh, area, ROI[0], ar, extent)
+    stats_p = locate_post(img, thresh, area, ROI[1], circularity)
+    
+    
+    if MASK=='POST': # apply binary mask at selected threshold (magnet or post)
+        img.binary([thresh[1]], False, False)
+    elif MASK=='MAGNET':
+        img.binary([thresh[0]], False, False)
+    else:
+        pass
+    img.to_rgb565() # convert to RGB
+    img.draw_rectangle(0, 0, sensor.width(), 150, (0,0,0), 0, True) # fill title block
+    
+    # add title, with all current parameters
+    img.draw_string(1,1,"MASKING: {}".format(MASK), scale=5, color=(0,255,0),x_spacing=-10)
+    txt= """                     Magnet | Post
+       Threshold: (%5.0f,%5.0f) | (%5.0f,%5.0f)
+            Area: (%5.0f,%5.0f) | (%5.0f,%6.0f)
+          Extent:         %5.2f | 
+    Aspect Ratio: (%5.2f,%5.2f) | (%5.2f,%5.2f)
+     Circularity:               | %4.2f
+        """ % ( thresh[0][0], thresh[0][1], thresh[1][0], thresh[1][1],
+                area[0][0], area[0][1], area[1][0], area[1][1],
+                extent,
+                ar[0], ar[1], 0.9, 1.1,
+                circularity)
+    img.draw_string(1,50,txt, x_spacing=-1,y_spacing=-1, scale=1.5, color=(0,255,0))
+    
+    # for each magnet found, show on image
+    k=0
+    for blob in stats_m:
+        if k==0: # for the first, flood fill and increase thickness of walls
+            th = 3
+            s = 5
+            if MASK == "MAGNET":
+                img.flood_fill(blob.cx(), blob.cy(), seed_threshold=0.05, color=(255,0,0))
+            else:
+                img.draw_rectangle(blob.rect(), thickness=th, color=(255,0,0))
+            #print("{},{},{},{},{},{},{}".format(blob[0],blob[1],blob[2],blob[3], blob.pixels(), blob.extent(), getAspectRatio(blob)), end=',')
+        else:
+            th = 1
+            s = 2
+        img.draw_rectangle(blob.rect(), thickness=th, color=(255,0,0))
+        
+        #img.flood_fill(blob.cx(), blob.cy(), color=(255,0,0))
+        img.draw_circle(blob.cx(), blob.cy(), s, color=(255,155,0), fill=True)  # marker
+        
+        img.draw_string(blob.cx()+1, blob.cy()+1, "E:%3.2f\nX:%3.2f\nAR:%3.2f" % (blob.elongation(), blob.extent(),getAspectRatio(blob)), scale=1, color=(255,155,0))
+        k += 1
+        
+    
+    k=0
+    for blob in stats_p:
+        if k==0:
+            th = 3
+            s = 5
+            if MASK == "POST":
+                img.flood_fill(blob.cx(), blob.cy(), seed_threshold=0.03, color=(0,255,255))
+            else:
+                circ = blob.enclosing_circle()
+                img.draw_circle(circ[0], circ[1], circ[2] ,thickness=th, color=(0,255,255))
+            #print("{},{},{},{},{},{},{}".format(blob[0],blob[1],blob[2],blob[3], blob.pixels(), blob.roundness(), cb.getAspectRatio(blob)))
+        else:
+            th = 1
+            s = 2
+        img.draw_circle(blob.cx(), blob.cy(), s, color=(0,155,255), fill=True)  # marker
+        #if blob.elongation() < 0.5:
+            #img.draw_edges(blob.min_corners(), thickness=th, color=(0,255,0))
+            #img.draw_line(blob.major_axis_line(), thickness=th, color=(0,255,0))
+            #img.draw_line(blob.minor_axis_line(), thickness=th, color=(0,255,0))
+        ## These values are stable all the time.
+        #img.draw_rectangle(blob.rect(), color=(255,255,0))
+        #img.draw_cross(blob.cx(), blob.cy(), thickness=th, color=(0,255,0))
+        #circ = blob.enclosing_circle()
+        #img.draw_circle(circ[0], circ[1], circ[2] ,thickness=th, color=(0,255,0))
+        #img.draw_string(blob.cx()+1, blob.cy()+1, "Area: \n"+str(blob.pixels()), scale=2, color=(0,155,255))
+        img.draw_string(blob.cx()+1, blob.cy()+1, "AR: %4.2f\nCirc: %4.2f" % (getAspectRatio(blob), blob.roundness()), scale=1, color=(0,155,255))
+        k=k+1
+        # Note - the blob rotation is unique to 0-180 only.
+        # bw.draw_keypoints([(blob.cx(), blob.cy(), int(blob.rotation_deg()))], size=40, color=127)
+    #print(' ')
+    
+    #print('IN HELPER. values = {},{},{},{},{},{},{}. fps = {}'.format(helper_magnet_thresh, helper_post_thresh, helper_magnet_area, helper_post_area, helper_magnet_extent, helper_magnet_aspectratio, helper_post_circularity, frame_rate));
+    #print('MASKING: {}'.format(HELPERMASK))
+    
+    
+    return stats_m, stats_p

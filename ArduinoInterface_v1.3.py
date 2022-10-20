@@ -14,11 +14,10 @@ ser = EstablishConnection(serialports)
 
 root = tk.Tk()
 root.geometry("800x500")
+
 gui = CS3D_GUI(root, ser)
 # root = tk.Tk()
 # gui = CS3D_GUI(root)
 # gui.update()
 gui.run_update()
 gui.mainloop()
-
-
