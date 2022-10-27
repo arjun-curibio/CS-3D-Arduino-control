@@ -6,6 +6,7 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import numpy as np
 import json
+import serial.tools.list_ports
 
 class CS3D_GUI:
     def __init__(self, root, ser=None):
@@ -40,20 +41,17 @@ class CS3D_GUI:
         self.t_camera = 0
         self.SerialInput = tk.StringVar(self.root, value='1')
         self.output = tk.StringVar(self.root, value='')
-        self.pos = tk.IntVar(self.root, 0)
 
         self.saveDataFlag = False
         self.applyFeedback = "Cyclic"
-        self.feedbackActiveFlag = False
+        self.feedbackActiveFlag = [False,False,False,False]
         self.counter = 0
-        self.reachedDesiredStretch = False
+        self.almostCounter = 0
+        self.reachedDesiredStretch = [False, False, False, False]
 
-        self.AdjUp  = tk.Button(self.root, relief='groove', borderwidth=2, text='-', command=lambda: self.sendAdj(0))
-        self.AdjDown = tk.Button(self.root, relief='groove', borderwidth=2, text='+', command=lambda: self.sendAdj(1))
-        self.Slider = tk.Scale(self.root, from_=-500, to=500, variable=self.pos, length=100, command=lambda val: self.sendPosition())
-        self.Slider.place(relwidth=0.075, relheight=0.9, relx=0.8, rely=0.05)
-        self.AdjUp.pack(side=tk.RIGHT)
-        self.AdjDown.pack(side=tk.RIGHT)
+        self.motorInited = [False, False, False, False]
+
+        
         
         for i in range(4):
             self.motorFrames.append(tk.Frame(self.root, background='white', borderwidth=2, relief='groove', width=500, height=100))
@@ -63,8 +61,7 @@ class CS3D_GUI:
             
             self.moveToButtons.append(tk.Button(self.motorFrames[-1], relief='groove', borderwidth=2, text='Move Camera\nto Row '+self.wellLabels[i]))
             self.retractButton.append(tk.Button(self.motorFrames[-1], relief='groove', borderwidth=2, text='Retract Motor'))
-            self.initMotorButton.append(tk.Button(self.motorFrames[-1], relief='groove', borderwidth=2, text='Home Motor'))
-            
+
             self.dists.append(tk.StringVar(self.motorFrames[-1], value='Distance: 20 steps'))
             self.distLabel.append(tk.Label(self.motorFrames[-1], textvariable=self.dists[i], foreground='black', background='white'))
             
@@ -81,6 +78,8 @@ class CS3D_GUI:
                 self.motorFrames[int(self.cameraUnderWell)].configure(borderwidth=2)
                 self.cameraUnderWell = motor
                 self.motorFrames[int(self.cameraUnderWell)].configure(borderwidth=7)
+                self.counter = 0
+                self.almostCounter = 0
             def retractMotor(motor = i):
                 string = 'X'+str(motor)
                 self.writeToSerial(string+'\n')
@@ -88,40 +87,46 @@ class CS3D_GUI:
             self.moveToButtons[-1].configure(command=moveTo)
             self.retractButton[-1].configure(command=retractMotor)
 
-            self.motorFrames[-1].place(bordermode=tk.OUTSIDE, relheight=0.2, relwidth=0.4, relx=0, rely=i*0.2)
+            self.motorFrames[-1].place(bordermode=tk.OUTSIDE, height=100, width=300, x=0, y=i*105)
             self.moveToButtons[-1].place(relwidth=0.3, relheight=0.5, relx=0.7, rely=0.05)
             self.retractButton[-1].place(relwidth=0.3, relheight=0.2, relx=0.7, rely=0.85)
             self.positionLabels[-1].place(relx=0.1, rely=0)
             self.freqLabel[-1].place(relx=0.1, rely=0.2)
             self.distLabel[-1].place(relx=0.1, rely=0.4)
-            self.enableLabel[-1].place(relx=0.1, rely=0.6)
+            self.enableLabel[-1].place(relx=0.0, rely=0.6)
     
         self.resetCameraButton = tk.Button(self.root, borderwidth=2, relief='groove', text='Reset Camera\nPostion', command=self.resetCamera)
-        self.resetCameraButton.place(relheight=0.075, relwidth=0.125, relx=0.4-0.125, rely=0.81)
+        self.resetCameraButton.place(x=100, y=430, width=100)
         self.retractAllButton = tk.Button(self.root, borderwidth=2, relief='groove', text='Retract All\nMotors', command=self.retractAllMotors)
-        self.retractAllButton.place(relheigh=0.075, relwidth=0.125, relx=0.4-0.125,rely=0.9)
+        self.retractAllButton.place(x=200, y=430, width=100)
         
         self.initMotor = tk.Button(self.root, borderwidth=2, relief = 'groove', text='Home Motor', command=self.initializeMotor)
-        self.initMotor.place(relx=0.5, rely=0.6)
+        self.initMotor.place(relx=0.5, rely=0.65)
+        self.AdjUp  = tk.Button(self.root, relief='groove', borderwidth=2, text='-', command=lambda: self.sendAdj(0))
+        self.AdjDown = tk.Button(self.root, relief='groove', borderwidth=2, text='+', command=lambda: self.sendAdj(1))
+        self.AdjUp.place(relx=0.5-0.025, rely=0.65)
+        self.AdjDown.place(relx=0.5+0.1, rely=0.65)
         self.InitCamera = tk.Button(self.root, borderwidth=2, relief='groove', text='INIT Camera', command=self.INITCAMERA)
-        self.InitCamera.place(relx=0.5, rely=0.8)
+        self.InitCamera.place(relx=0.5, rely=0.7)
         self.Output = tk.Entry(self.root, textvariable=self.output)
         self.Output.bind('<Return>', func=lambda val: self.sendOutput())
         self.Output.pack()
 
         self.EnableDisableButton = tk.Button(self.root, borderwidth=2, relief='groove', text="Enable/Disable Motor", command=self.EnableDisable)
         self.ResetButton = tk.Button(self.root, borderwidth=2, relief='groove', text='Zero Motor Position', command=self.ResetMotor)
-        self.feedbackButton = tk.Button(self.root, text='Apply Feedback: '+self.applyFeedback, borderwidth=2, relief='groove', command=self.toggleFeedback)
+        self.feedbackButton = tk.Button(self.root, text='Enable Feedback', borderwidth=2, relief='groove', command=self.toggleFeedback)
         
-        self.EnableDisableButton.pack()
-        self.ResetButton.pack()
-        self.feedbackButton.pack()
+        self.EnableDisableButton.place(relx=0.5,rely=0.6)
+        # self.ResetButton.pack()
+        self.feedbackButton.place(relx=0.6, rely=0.55)
         self.desiredStretchEntry = tk.Entry(self.root, relief='groove',borderwidth=2, textvariable=self.desiredStretch)
-        self.desiredStretchEntry.pack()
+        self.desiredStretchEntry.place(relx=0.55, rely=0.55, width=20)
+        tk.Label(self.root, text="Stretch:").place(relx=0.49, rely=0.55)
+        tk.Label(self.root, text="%").place(relx=0.575, rely=0.55, width=10)
         self.textLabel = tk.Label(self.root, textvariable=self.SerialInput, fg='black')
         # self.textLabel.pack()
         self.close_button = tk.Button(self.root, relief='groove', borderwidth=2, text="Close", command=root.destroy)
-        self.close_button.pack()
+        self.close_button.place(x=700,y=400,width=100,height=50)
 
         self.saveButton = tk.Button(self.root, relief='groove', borderwidth=2, text="Save Data", command=self.saveData)
         self.saveButton.pack()
@@ -146,7 +151,7 @@ class CS3D_GUI:
         self.writeToSerial('V'+'\n')
     
     def initializeMotor(self):
-        string = "MOTORINIT" + str(self.cameraUnderWell)
+        string = "MOTORINIT&" + str(self.cameraUnderWell)
         self.writeToSerial("INIT"+'\n')
         self.root.after(1000)
         self.writeToSerial(string+'\n')
@@ -169,13 +174,13 @@ class CS3D_GUI:
     def writeToSerial(self, string):
         if self.ser != None:
             self.conn.write(string.encode())
-        # print(string)  
+        print((str(self.t)+': '+string))
     def toggleFeedback(self):
-        if self.feedbackActiveFlag == True:
-            self.feedbackActiveFlag = False
+        if self.feedbackActiveFlag[self.cameraUnderWell] == True:
+            self.feedbackActiveFlag[self.cameraUnderWell] = False
             self.feedbackButton.configure(borderwidth=2)
         else:
-            self.feedbackActiveFlag = True
+            self.feedbackActiveFlag[self.cameraUnderWell] = True
             self.feedbackButton.configure(borderwidth=5)
     def saveData(self):
         if self.saveDataFlag == False:
@@ -204,13 +209,6 @@ class CS3D_GUI:
         self.Slider.update()
     def sendAdj(self, adj):
         string = 'A'+str(self.cameraUnderWell)+','+str(adj)
-        if adj == 0:
-            self.pos.set(self.pos.get() - 4)
-            self.Slider.update()
-        elif adj == 1:
-            self.pos.set(self.pos.get() + 4)
-            self.Slider.update()
-        
         self.writeToSerial(string+'\n')
     def sendPosition(self):
         string = 'O'+str(self.cameraUnderWell)+','+str(self.pos.get())
@@ -220,14 +218,20 @@ class CS3D_GUI:
         self.output.set('')
         self.Output.update()
     def EnableDisable(self):
-        string = 'M'+str(self.cameraUnderWell)
-        self.writeToSerial(string+'\n')
+        if self.motorEnableState[self.cameraUnderWell] == 1 and self.motorInited[self.cameraUnderWell] == True:
+            string = 'M'+str(self.cameraUnderWell)
+            self.writeToSerial(string+'\n')
+        elif self.motorEnableState[self.cameraUnderWell] == 0:
+            string = 'M'+str(self.cameraUnderWell)
+            self.writeToSerial(string+'\n')
+        pass
+
     def update(self):
         if self.ser == None:
             string = '1'
         else:
             string, magic = self.readFromSerial()
-            print(string)
+            # print(self.feedbackActiveFlag)
             self.values = string.split(';')
             self.motorValues = []
             magic = self.values.pop(0)
@@ -235,12 +239,14 @@ class CS3D_GUI:
                 pass
             elif magic == '-33':
                 self.t = int(self.values.pop(0))
-                self.t_camera, self.cameraUnderWell, self.stretch, self.foundMax, self.max_stretch = tuple(self.values.pop(0).split('&'))
+                self.t_camera, self.cameraUnderWell, self.MotorInitWell, self.recievedMotorInitHandshake, self.stretch, self.foundMax, self.max_stretch = tuple(self.values.pop(0).split('&'))
+                # print(self.foundMax)
                 self.cameraUnderWell = int(self.cameraUnderWell)
                 for i in range(4):
-                    motorID, motorT, position, dist, freq, passive_len, MotorInited, CameraInited, enableMotorState = tuple(self.values[0].split('&'))
+                    motorID, motorT, position, dist, freq, passive_len, MotorInited, CameraInited, enableMotorState, beginMotorInitFlag = tuple(self.values[0].split('&'))
+                    self.motorInited[i] = bool(int(MotorInited))
                     self.values.pop(0)
-                    if self.feedbackActiveFlag == True and self.cameraUnderWell == i:
+                    if self.feedbackActiveFlag[self.cameraUnderWell] == True and self.cameraUnderWell == i:
                         self.positions[i].set('Stretch: '+str(round(float(self.stretch),1))+' %')
                     else:
                         self.positions[i].set('Current position: '+position+' steps')
@@ -256,20 +262,22 @@ class CS3D_GUI:
                     #     self.enable[i].set('Enabled')
                     #     self.enableLabel[i].configure(foreground='red')
                     
-                    val = 'MotorInited: '
+                    val = 'Motor Homed: '
                     if int(MotorInited) == 1: val += 'Y, '
                     else: val += 'N, ' 
-                    val += 'CameraInited: '
+                    val += 'Camera Inited: '
                     if int(CameraInited) == 1: val += 'Y'
                     else: val += 'N'
-                    val+="\nFeedback: "
-                    if self.feedbackActiveFlag == False:
-                        val+="Not Active"
-                    else:
-                        if self.reachedDesiredStretch == False:
-                            val+="N"
+                    if self.feedbackActiveFlag[i] == False:
+                        val+="\nFeedback: Not Active"
+                    elif self.feedbackActiveFlag[i] == True:
+                        if self.motorEnableState[i] == 1:
+                            val += "\nMotor Off"
                         else:
-                            val+="Y"
+                            if self.reachedDesiredStretch[i] == False:
+                                val+="\nFeedback: N"
+                            else:
+                                val+="\nFeedback: Y"
                     # if int(MotorInited) == 1:
                     #     self.EnableDisableButton.configure(state='normal')
                     # else:
@@ -296,39 +304,8 @@ class CS3D_GUI:
                 # self.ax.plot(self.positionHistory, self.stretchHistory)
                 # self.canvas.draw()
 
-                if self.feedbackActiveFlag == True:
-                    if self.foundMax=='1' and self.cameraVals[0] != '-1' and self.motorEnableState[self.cameraUnderWell] == 0:
-                        print(str(self.t)+':', end='')
-                        self.max_stretch_aslist = json.loads(self.max_stretch)[-1]
-                        max_stretch_active = round(100*np.mean(self.max_stretch_aslist)/self.passive_len[self.cameraUnderWell],1)
-                        # print(np.mean(self.max_stretch_aslist))
-                        
-                        diff = max_stretch_active - int(self.desiredStretch.get())
-                        self.reachedDesiredStretch = False
-                        if diff > 2: 
-                            self.counter = 0
-                            new_dist = round(1 + abs(diff*0.5))
-                        elif diff < -2:
-                            self.counter = 0
-                            new_dist = round(1 + abs(diff*0.5))
-                        elif diff > 0.2:
-                            self.counter = 0
-                            new_dist = 1
-                        elif diff < -0.2:
-                            self.counter = 0
-                            new_dist = 1
-                        
-                        else:
-                            new_dist = 0
-                            self.counter += 1
-                            if self.counter > 2:
-                                self.reachedDesiredStretch = True
-                        
-                        new_dist = -1*np.sign(diff)*new_dist
-                        val = "D"+str(self.cameraUnderWell)+','+str(int(self.dist_num[self.cameraUnderWell]+new_dist))
-                        print(val)
-                        self.writeToSerial(val+'\n')
-                    
+                if self.feedbackActiveFlag[self.cameraUnderWell] == True:
+                    self.applyFeedbackFunc()
                 else:
                     pass
                     # val = "D"+str(self.cameraUnderWell)+','+str(self.dist_num[self.cameraUnderWell])
@@ -351,7 +328,45 @@ class CS3D_GUI:
             self.conn.flush()
         self.root.after(1, self.update)
     
-    
+    def applyFeedbackFunc(self):
+        if self.foundMax=='1' and self.cameraVals[0] != '-1' and self.motorEnableState[self.cameraUnderWell] == 0:
+            # print(str(self.t)+':', end='')
+            self.max_stretch_aslist = json.loads(self.max_stretch)[-1]
+            
+            max_stretch_active = round(100*np.mean(self.max_stretch_aslist)/self.passive_len[self.cameraUnderWell],1)
+            # print(np.mean(self.max_stretch_aslist))
+            
+            diff = max_stretch_active - int(self.desiredStretch.get())
+            self.reachedDesiredStretch[self.cameraUnderWell] = False
+            if diff > 2: 
+                self.counter = 0
+                self.almostCounter = 0
+                new_dist = round(1 + abs(diff*0.5))
+            elif diff < -2:
+                self.counter = 0
+                self.almostCounter = 0
+                new_dist = round(1 + abs(diff*0.5))
+            elif diff > 0.5:
+                self.counter = 0
+                self.almostCounter += 1
+                new_dist = 1
+            elif diff < -0.5:
+                self.counter = 0
+                self.almostCounter += 1
+                new_dist = 1
+            
+            else:
+                new_dist = 0
+                self.counter += 1
+                self.almostCounter += 1
+                if self.counter > 2 or self.almostCounter > 4:
+                    self.reachedDesiredStretch[self.cameraUnderWell] = True
+            
+            new_dist = -1*np.sign(diff)*new_dist
+            val = "D"+str(self.cameraUnderWell)+','+str(int(self.dist_num[self.cameraUnderWell]+new_dist))
+            print(val)
+            self.writeToSerial(val+'\n')
+        pass
     def mainloop(self): # blocking
         self.root.mainloop()
 
@@ -397,3 +412,21 @@ class EstablishConnection:
     def close(self):
         self.conn.close()
 
+if __name__ == '__main__':
+    serialports = serial.tools.list_ports.comports()
+    ser = EstablishConnection(serialports)
+    # if ser.ActiveSerial == True:
+    #     root = tk.Tk()
+    #     root.geometry("800x500")
+    #     gui = CS3D_GUI(root, ser)
+    #     # HELPER_GUI(gui, ser.conn)
+
+    root = tk.Tk()
+    root.geometry("800x500")
+
+    gui = CS3D_GUI(root, ser)
+    # root = tk.Tk()
+    # gui = CS3D_GUI(root)
+    # gui.update()
+    gui.run_update()
+    gui.mainloop()

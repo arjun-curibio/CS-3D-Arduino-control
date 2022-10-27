@@ -1,5 +1,5 @@
 import math
-
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backend_bases import MouseEvent
 
@@ -11,7 +11,7 @@ class DraggablePlot():
         self._figure, self._axes, self._line = None, None, None
         self._dragging_point = None
         self._points = {0:0, 40:50, 60:50, 70:0}
-
+        
         self._init_plot()
         self._update_plot()
         
@@ -33,17 +33,31 @@ class DraggablePlot():
     def _update_plot(self):
         if not self._points:
             self._line.set_data([], [])
+            print('1')
         else:
             x, y = zip(*sorted(self._points.items()))
+            print(x)
+            print(y)
+            
+            for i in range(1,len(x)):
+                x_distance = x[i]-x[i-1]
+                if x_distance < 10:
+                    x_list = list(x)
+                    x_list[0] = 0
+                    x_list[i] = x_list[i-1]+10
+                    x = tuple(x_list)
             # Add new plot
             if not self._line:
                 self._line, = self._axes.plot(x, y, "b", marker="o", markersize=10)
             # Update current plot
             else:
                 self._line.set_data(x, y)
+        
+        
         self._figure.canvas.draw()
-        print(x)
-        self._axes.set_title = x
+        print(self._line.get_data())
+        # print(x)
+        self._axes.set_title(x)
 
     def _add_point(self, x, y=None):
         if isinstance(x, MouseEvent):
@@ -60,7 +74,7 @@ class DraggablePlot():
         :rtype: ((int, int)|None)
         :return: (x, y) if there are any point around mouse else None
         """
-        distance_threshold = 3.0
+        distance_threshold = 10
         nearest_point = None
         min_distance = math.sqrt(2 * (100 ** 2))
         for x, y in self._points.items():
@@ -81,16 +95,19 @@ class DraggablePlot():
             point = self._find_neighbor_point(event)
             if point:
                 self._dragging_point = point
+                # print(self._dragging_point)
+                hold_y = self._dragging_point[1]
+                # print(hold_y)
             else:
-                self._add_point(event)
+                # self._add_point(event)
                 pass
             self._update_plot()
         # right click
-        elif event.button == 3 and event.inaxes in [self._axes]:
-            point = self._find_neighbor_point(event)
-            if point:
-                self._remove_point(*point)
-                self._update_plot()
+        # elif event.button == 3 and event.inaxes in [self._axes]:
+        #     point = self._find_neighbor_point(event)
+        #     if point:
+        #         self._remove_point(*point)
+        #         self._update_plot()
 
     def _on_release(self, event):
         u""" callback method for mouse release event
@@ -108,7 +125,15 @@ class DraggablePlot():
             return
         if event.xdata is None or event.ydata is None:
             return
+        event.ydata = self._dragging_point[1]
+        if event.xdata > 90:
+            event.xdata = 90
+        
+        print(event)
         self._remove_point(*self._dragging_point)
         self._dragging_point = self._add_point(event)
+        
         self._update_plot()
 
+if __name__ == '__main__':
+    fig = DraggablePlot()

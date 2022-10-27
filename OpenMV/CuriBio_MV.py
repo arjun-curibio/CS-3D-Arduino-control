@@ -23,10 +23,10 @@ class Serial:
         current_well, command, info = 0, '', []
         #print('reading')
         val = self.uart.read()
-        #print(val)
+        print(val)
         if val is not None:
             if len(val) > 4 and len(val) < 200:
-                print(len(val))
+                #print(len(val))
                 val = val.decode('utf-8')
                 
                 info = val.split('#')[0].split('&')
@@ -159,6 +159,7 @@ class makehgtform:
         new_cols = range(xymin[0], xymax[0])
         return new_rows, new_cols
 
+
 class CircularBuffer:
     # Track values, resetting the signal after it reaches the end
     def __init__(self, buflen):
@@ -177,6 +178,8 @@ class CircularBuffer:
             self.buffer.pop(0) # remove the first number from the list
     def signal(self):
         return self.buffer
+    def length(self):
+        return len(self.buffer)
     #def length(self):
         #if self.count < self.buflen:
             #return self.head
@@ -214,14 +217,15 @@ class MaxTracker:
     """ Track the index of maximum values in a signal
     """
 
-    def __init__(self, buflen, CircularBufferSize):
+    def __init__(self, buflen, CircularBufferSize,n_hysteresis):
         self.tracker = CircularBuffer(buflen)  # List of v
         self.milliseconds = CircularBuffer(buflen) # List of t
         self.maxes = CircularBuffer(CircularBufferSize)  # List of last few v at max in signal
         self.max_times = CircularBuffer(CircularBufferSize) # List of last few t at max in signal
-
+        
+        
         self.max_signal = None # remember last max signal
-        self.update_max = False
+        self.update_max = True
 
         self.last_max = float('-Inf') # Following max up
         self.last_tmax = 0
@@ -234,12 +238,17 @@ class MaxTracker:
         self.min_dt = 1000.0 / max_freq  # in milliseconds per cycle
 
         self.hysteresis = 0.8
+        self.n_hysteresis = n_hysteresis
         self.count = -1  # Number of values processed
-        self.last_20 = [] # Last 20 signal values (used to apply hysteresis-based max finding)
+        self.hysteresis_signal = [] # Last 20 signal values (used to apply hysteresis-based max finding)
         
+        self.avg_filter = 0
         self.direction = 0
         self.foundMax = 0
-
+        self.v = 0
+        self.countMaxes = 0
+    
+    
     def process(self, t, v) -> int:
         """ Process time and signal value while looking for maximums
         Pass in the values sequentially
@@ -252,43 +261,44 @@ class MaxTracker:
         self.direction = 0
         self.count += 1
         
+        self.v = v
         # track Signal
         self.milliseconds.append(t)
         self.tracker.append(v)
 
         # Remember the last 20 points of v
-        if len(self.last_20) < 20:
-            self.last_20.append(v)
-        else:
-            self.last_20.append(v)
-            self.last_20.pop(0)
-
+        self.hysteresis_signal.append(v)
+        if len(self.hysteresis_signal) > self.n_hysteresis:
+            self.hysteresis_signal.pop(0)
+        
         # Compute hysteresis from last 20 points
         # This could be replaced by a recursive formula
-        if len(self.last_20) > 3:
-            std = np.std(self.last_20)
+        if len(self.hysteresis_signal) > 3:
+            std = np.std(self.hysteresis_signal)
+            self.avg_filter = np.mean(self.hysteresis_signal)
             self.hysteresis = max(std, 0.5)  # Don't allow std to go below 0.5
-
+            
+        
         # Follow max up
         i = self.count
         if i > 4 and self.update_max and v > self.last_max:
             # Found a higher max
-            self.last_max = round(v)
+            self.last_max = v
             self.last_tmax = t
 
         # Follow min down
         if i > 4 and not self.update_max and v < self.last_min:
             # Found a lower min
-            self.last_min = round(v)
+            self.last_min = v
             self.last_tmin = t
 
-        if self.update_max and v < self.last_max - self.hysteresis and t > self.last_tmin + self.min_dt:
+        if self.update_max and v < (self.last_max - self.hysteresis) and t > self.last_tmin + self.min_dt:
             # Update hysteresis dynamically (but slowly)
             # if len(self.maxes) > 0:
             #     delta = self.last_max - self.last_min
             #     if delta > self.hysteresis * 4:
-            #         self.last_20.pop(-1)  # Remove spurious point
-            #     std = np.std(self.last_20)
+            #         self.hysteresis_signal.pop(-1)  # Remove spurious point
+            #     std = np.std(self.hysteresis_signal)
             #     self.hysteresis = std/2  # 1/2 standard deviation
             #     self.hysteresis = (self.hysteresis + delta / 4) / 2
             # max_twitch = self.last_max
@@ -301,6 +311,7 @@ class MaxTracker:
                     self.maxes.append(round(self.last_max))
                     self.max_signal = round(self.last_max)  # Remember last maximum signal
                     self.foundMax = 1
+                    self.countMaxes += 1
             self.last_min = self.last_max
             self.last_tmin = self.last_tmax
             self.update_max = False  # Now looking for min
@@ -308,13 +319,13 @@ class MaxTracker:
             direction = +1  # max detected
             self.direction = 1
 
-        elif not self.update_max and v > self.last_min + self.hysteresis:
+        elif not self.update_max and v > (self.last_min + self.hysteresis):
             # Update hysteresis dynamically (but slowly)
             # if len(self.maxes) > 0:
             #     delta = self.last_max - self.last_min
             #     if delta > self.hysteresis * 4:
-            #         self.last_20.pop(-1)  # Remove spurious point
-            #     std = np.std(self.last_20)
+            #         self.hysteresis_signal.pop(-1)  # Remove spurious point
+            #     std = np.std(self.hysteresis_signal)
             #     self.hysteresis = std / 2  # 1/2 standard deviation
             #     self.hysteresis = (self.hysteresis + delta / 4) / 2
             # This is where we might update the passive deflection
@@ -408,7 +419,9 @@ class PostAndMagnetTracker:
         :param roi is a 4 element tuple (xmin,xmax,ymin,ymax)
         """
         frames_to_plot = 200
-        self.maxTracker = MaxTracker(frames_to_plot, CircularBufferSize)
+        n_hysteresis = 50
+        self.maxTracker = MaxTracker(frames_to_plot, CircularBufferSize, n_hysteresis)
+        
         self.fps = fps
         self.nframes = nframes
         self.thresh_range = thresh_range
@@ -433,7 +446,8 @@ class PostAndMagnetTracker:
 
         self.automatic_thresh = False  # Automatically determine the thresholds
         self.stats_m = None
-
+        self.centroid_p = [0,0]
+        self.value = [],[],[]
         # Lazily initialized when first image is processed
         self.passive_deflection = None  # deflection in pixels
         self.dist_neutral = None  # distance in pixels
@@ -761,7 +775,7 @@ class PostAndMagnetTracker:
         # Locate magnet and post
         width = sensor.width()
         height = sensor.height()
-
+        
         if self.stats_m == None:
             self.roi_magnet = (330, 585, 188, 344)
             stats_m = locate_magnet(img, self.thresh_range, self.area_range, self.roi_magnet, self.aspectratio, self.extent)
@@ -790,8 +804,16 @@ class PostAndMagnetTracker:
             img.draw_rectangle(mag_roi[0],mag_roi[2],mag_roi[1]-mag_roi[0],mag_roi[3]-mag_roi[2],color=255, thickness=2)
             
             stats_m = locate_magnet(img, self.thresh_range, self.area_range, mag_roi, self.aspectratio, self.extent)
-            bbox = self.stats_m[0].rect()
             img.draw_rectangle(bbox[0], bbox[1], bbox[2], bbox[3], color=155, thickness=2)
+            if stats_m == None:
+                centroid_m = np.array((self.stats_m[0].cx(), self.stats_m[0].cy()))
+            elif len(stats_m) > 0:
+                stats_m = [stats_m[0]]
+                self.stats_m = [stats_m[0]]
+                self.centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
+            elif len(stats_m) == 0:
+                centroid_m = np.array((self.stats_m[0].cx(), self.stats_m[0].cy()))
+            bbox = self.stats_m[0].rect()
             
             # BACKUP MAGNET TRACKER
             self.roi_magnet = (330, 585, 188, 344)
@@ -799,14 +821,7 @@ class PostAndMagnetTracker:
             
             
             
-        if stats_m == None:
-            centroid_m = np.array((self.stats_m[0].cx(), self.stats_m[0].cy()))
-        elif len(stats_m) > 0:
-            stats_m = [stats_m[0]]
-            self.stats_m = [stats_m[0]]
-            self.centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
-        elif len(stats_m) == 0:
-            centroid_m = np.array((self.stats_m[0].cx(), self.stats_m[0].cy()))
+        
         
         
         if postManualFlag:
@@ -825,29 +840,34 @@ class PostAndMagnetTracker:
                 centroid_p = np.array(postManual)
                 #self.extra_print_string += ", None Post Centroid"
         
-        dist_current = np.linalg.norm(self.centroid_m - self.centroid_p)
-        twitch_deflection = dist_current - self.dist_neutral
-        self.twitch_deflection = twitch_deflection
-        # print('twitch deflection=', twitch_deflection)
-        # Track the capture time, deflection and max
-        self.maxTracker.process(capture_time_ms, twitch_deflection)
-        
-        value = func(self, self.maxTracker)  # returns 
-        
-        milliseconds = self.maxTracker.time()
-        time_of_max = self.maxTracker.time_of_maximums()
-        #centroid_m, centroid_p, milliseconds, time_of_max, value = plotting_parameters
-        #ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
-        #plotting_parameters = (centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
-        if not postManualFlag:
-            for stat in stats_p:
-                x,y,r = stat.enclosing_circle()
-                
-                img.draw_circle(x,y,r,color=(0,255,0), thickness=2)
-                
-                x,y,w,h = stat.rect()
-                img.draw_rectangle(x,y,w,h,color=(255,255,0), thickness=4)
-        #print([100*i/self.dist_neutral for i in self.maxTracker.maxes.signal()])
+        value = self.value
+        if sum(self.centroid_p) != 0:
+            dist_current = np.linalg.norm(self.centroid_m - self.centroid_p)
+            twitch_deflection = dist_current - self.dist_neutral
+            self.twitch_deflection = twitch_deflection
+            # print('twitch deflection=', twitch_deflection)
+            # Track the capture time, deflection and max
+            self.maxTracker.process(capture_time_ms, twitch_deflection)
+            
+            #self.maxTrackerv2.process(capture_time_ms, twitch_deflection)
+            value = func(self, self.maxTracker)  # returns 
+            #value = func(self, self.maxTrackerv2)
+            self.value = value
+            
+            milliseconds = self.maxTracker.time()
+            time_of_max = self.maxTracker.time_of_maximums()
+            #centroid_m, centroid_p, milliseconds, time_of_max, value = plotting_parameters
+            #ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
+            #plotting_parameters = (centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
+            if not postManualFlag:
+                for stat in stats_p:
+                    x,y,r = stat.enclosing_circle()
+                    
+                    img.draw_circle(x,y,r,color=(0,255,0), thickness=2)
+                    
+                    x,y,w,h = stat.rect()
+                    img.draw_rectangle(x,y,w,h,color=(255,255,0), thickness=4)
+            #print([100*i/self.dist_neutral for i in self.maxTracker.maxes.signal()])
         return value
         
         
@@ -924,7 +944,7 @@ class PostAndMagnetTracker:
                 title += " / Max Stretch: %4.1f%%" % max_stretch[-1]
                 title += " / Thresh: {} ".format(self.thresh_range[0][1])
                 
-                title += " \nMax Stretch: {}".format([100*i/self.dist_neutral for i in list(self.maxTracker.maxes.signal())])
+                title += " \nMax Stretch: {}".format(self.maxTracker.countMaxes)
             
             #if len(beat_freq) > 0:
                 #title = title + ("\nBeat freq: %.2f Hz" % beat_freq[-1])
@@ -1056,8 +1076,8 @@ def nonzero_runs(y):
 
     # Find the beginning index of constant runs within boolean array y and associated runlen
     dy = np.diff(yaug)
-    run_begin = nonzero(dy > 0)
-    run_end = nonzero(dy < 0)
+    run_begin = nonzero(dy >= 1)
+    run_end = nonzero(dy <= -1)
     # print("run_begin=",run_begin)
     # print("run_end=",run_end)
     # if run_begin is not None and run_end is not None:
@@ -1568,8 +1588,6 @@ def HelperFunction(img, thresh, area, ROI, ar, extent, circularity, MASK):
         
         img.draw_string(blob.cx()+1, blob.cy()+1, "E:%3.2f\nX:%3.2f\nAR:%3.2f" % (blob.elongation(), blob.extent(),getAspectRatio(blob)), scale=1, color=(255,155,0))
         k += 1
-        
-    
     k=0
     for blob in stats_p:
         if k==0:

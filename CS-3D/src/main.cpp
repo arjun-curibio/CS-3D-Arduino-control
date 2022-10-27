@@ -18,6 +18,7 @@
 
 // Serial definition (for readability)
 #define OMV Serial1
+
 // GLOBAL MOTOR CONSTANTS
 const int MS1Val = HIGH;
 const int MS2Val = HIGH;
@@ -28,14 +29,14 @@ const int RSTVal = HIGH;
 int SLPVal = HIGH;
 
 // MOTOR CONSTANTS
-const int STEP[4] = {23, 22, 21, 20};
-const int DIR[4]  = {18, 17, 16, 15};
-const int EN[4]   = { 6,  5,  4,  3};
+const int STEP[4] = {23, 22, 21, 20}; // STEP PIN
+const int DIR[4]  = {18, 17, 16, 15}; // DIR PIN
+const int EN[4]   = { 6,  5,  4,  3}; // EN PIN
 
 // MOTOR VARIABLES
 float                freqs[4] = { 1,  1,  1,  1};
-uint32_t            period[4] = {   0 ,    0 ,    0 ,     0};
-long                 dists[4] = {  25,   25,   25,   25};
+uint32_t            period[4] = { 0,  0,  0,  0};
+long                 dists[4] = {  25,   25,   25,   25}; // [motor steps]
 int MotorStartingPositions[4] = { 500,  500,  500,  500};
 
 // MOTOR WAVEFORM VARIABLES
@@ -65,6 +66,7 @@ boolean MotorInited[4]    = { LOW,  LOW,  LOW,  LOW}; // WHETHER MOTOR IS INITIA
 boolean CameraInited[4]   = { LOW,  LOW,  LOW,  LOW}; // WHETHER CAMERA IS INITIALIZED
 boolean gotStretchFlag = LOW;
 boolean foundMax = LOW;
+int MotorInitWell = 0;
 
 // CAMERA VARIABLES
 int     CameraUnderWell         = 0; // WHICH WELL THE CAMERA IS UNDER
@@ -96,9 +98,9 @@ float frequencyValue = 0.;
 int32_t t_camera = 0;
 int last_max_stretch = 0;
 int passive_len[4] = {100, 100, 100, 100};
-int mag_thresh[4][2] = {{20, 40}, {20, 40}, {20, 40}, {20, 40}};
-int post_thresh[4][2] = { {0, 15}, {0, 15}, {0, 15}, {0, 15}};
-int post_centroid[4][2] = { {0, 0}, {0, 0}, {0, 0}, {0, 0}};
+int mag_thresh[4][2]    = {{20, 40}, {20, 40}, {20, 40}, {20, 40}};
+int post_thresh[4][2]   = {{0, 15},  {0, 15},  {0, 15},  {0, 15}};
+int post_centroid[4][2] = {{0, 0},   {0, 0},   {0, 0},   {0, 0}};
 boolean HELPERFLAG = LOW;
 String HELPERMASK = "None";
 int32_t valueArray[50];
@@ -106,7 +108,7 @@ boolean OMVStringComplete = LOW;
 String mv = "";
 String maxs = "[]";
 boolean POSTCENTROIDMANUALFLAG  = LOW; // MANUAL OVERRIDE OF POST CENTROID (OPENMV PASSTHROUGH)
-
+boolean recievedMotorInitHandshake = LOW;
 int k = 0;
 AccelStepper *stArray[4];
 AccelStepper stCamera(1, STEPCAMERA, DIRCAMERA);
@@ -250,7 +252,7 @@ void CameraReset() {
   ResetCameraFlag = HIGH;
   //  enableStateCamera = HIGH;
   //  digitalWrite(SLPCAMERA, enableStateCamera);
-  CameraMove(-23350);
+  CameraMove(25000);
   //  stCamera.setMaxSpeed(100000);
 }
 void StartingPositions(int MOTOR, int action) {
@@ -320,6 +322,7 @@ void setup() {
   }
 
   // CAMERA STAGE VARIABLE SET-UP
+  stCamera.setPinsInverted(HIGH, LOW, LOW);
   stCamera.setMaxSpeed(CameraSpeed);
   stCamera.setAcceleration(CameraSpeed);
   stCamera.setCurrentPosition(0);
@@ -335,7 +338,6 @@ void setup() {
   //   OMV.setTimeout(1);
   sizeOfSerialBuffer = sizeof(serial1buffer);
   OMV.addMemoryForRead(serial1buffer, sizeOfSerialBuffer);
-  Serial1.println("HELLO");
   establishConnection();
 
   // MOTOR INITIALIZATION
@@ -398,15 +400,22 @@ void loop() {
       resetFunc(); // reset Arduino
     }
     else if (command.substring(0, 9) == "MOTORINIT") {
-      int st = command.substring(9, command.length()-1).toInt();
-      Serial.print(command);
-      Serial.print(',');
-      Serial.println(st);
-      enableState[st] = LOW;
+      int index = command.indexOf('&');
+      command = command.substring(index+1);
+      int st = command.substring(0, command.length()-1).toInt();
+      // Serial.print(command);
+      // Serial.print(',');
+      // Serial.println(st);
+      enableState[st] = HIGH;
       manualOverride[st] = LOW;
       beginMotorInitFlag[st] = HIGH; // Start motor initialization
       bringDown = LOW; bringUp = LOW;
       sendMotorInitToOMV = HIGH;
+      MotorInitWell = st;
+      recievedMotorInitHandshake = LOW;
+      OMV.print(st);
+      OMV.print('&');
+      OMV.println("MOTORINIT#");
     }
     else if (command.substring(0, 6) == "UPDATE") {
       OMV.println(command);
@@ -640,7 +649,7 @@ void loop() {
       CameraMove(CameraPosition);
       CameraMove(CameraPosition);
     }
-    else if (command.substring(0, 1) == "B") {
+    else if (command.substring(0, 1) == "B") { // Camera Speed
       CameraSpeed = command.substring(1, command.length() - 1).toInt();
       stCamera.setMaxSpeed(CameraSpeed);
       stCamera.setAcceleration(CameraSpeed);
@@ -653,6 +662,8 @@ void loop() {
     else if (command.substring(0, 1) == "X") { // emergency retract
       int st = command.substring(1, command.length() - 1).toInt();
       MotorRetract(st);
+      MotorInited[st] = LOW;
+      MotorDistance(st,25);
     }
     else if (command.substring(0, 1) == "P") { // starting Positioning
       int st = command.substring(1, 3).toInt();
@@ -668,9 +679,14 @@ void loop() {
     int magic = -22; // initialize to -22 (not used)
     if (mv != "") {
       OMV.flush();
-      int index = mv.indexOf('#', 0); // find first &
+      int index = mv.indexOf('#', 0); // find first #
       magic = mv.substring(0, index).toInt(); // store first substring as magic number
       mv = mv.substring(index + 1); // remove magic number
+    }
+    if (magic == -47) {
+      CameraInited[CameraUnderWell] = LOW;
+      MotorInited[CameraUnderWell] = LOW;
+      enableState[CameraUnderWell] = HIGH;
     }
     if (magic == -35) { // <t>#<stretch>#<foundMax>#<max_stretch>\n
       gotStretchFlag = HIGH;
@@ -690,7 +706,6 @@ void loop() {
       int index2 = mv.indexOf(']');
       maxs = mv.substring(index, index2+1);
     }
-
     if (magic == -43) { // <t>&<current_well>&<passive_length>&<magnet_thresh>&<post_threshold>&<centroid_post>\n
       
       int index = mv.indexOf('#');
@@ -725,8 +740,20 @@ void loop() {
       post_centroid[CameraUnderWell][1] = mv.substring(index2 + 1, index - 1).toInt();
       mv = mv.substring(index + 1); // remove magic number
     }
-    // Serial.println(mv);
-
+    if (magic == -41) { // Camera reset
+      CameraInited[CameraUnderWell] = LOW;
+    }
+    if (magic == -51) { // Motor Initialization Handshake
+      int index = mv.indexOf('#');
+      int CameraUnderWell = mv.substring(0, index).toInt();
+      if (MotorInitWell != CameraUnderWell) {
+        beginMotorInitFlag[MotorInitWell] = LOW;
+      }
+      else {
+        recievedMotorInitHandshake = HIGH;
+        enableState[MotorInitWell] = LOW;
+      }
+    }
   }
 
   // MOTOR UPDATE
@@ -767,9 +794,10 @@ void loop() {
           MotorResetPosition(st);
         }
       }
-      else if (beginMotorInitFlag[st] == HIGH) {// MOTOR INITIALIZATION (RE-HOMING)
+      else if (beginMotorInitFlag[st] == HIGH && recievedMotorInitHandshake == HIGH) {// MOTOR INITIALIZATION (RE-HOMING)
         if (bringDown == LOW && bringUp == LOW) {
           stArray[st]->setMaxSpeed(1000);
+          stArray[st]->setAcceleration(1000);
           stArray[st]->moveTo(-500);
           stArray[st]->run();
 
@@ -780,31 +808,32 @@ void loop() {
           beginMotorInitFlag[st] = LOW; // immediately stop motor initialization
           enableState[st] = HIGH; // diasble motor
         }
-        if (bringDown == HIGH) {
-          stArray[st]->moveTo(1000);
-          stArray[st]->setMaxSpeed(100);
-          stArray[st]->setAcceleration(50);
+        if (bringDown == HIGH) { // Bring the motor down
+          stArray[st]->moveTo(1000); // Arbitrarily down
+          stArray[st]->setMaxSpeed(100); // Medium speed
+          stArray[st]->setAcceleration(50); // Matching acceleration
           stArray[st]->run();
-          if (stretchValue > 2 && gotStretchFlag==HIGH) {
-            bringDown = LOW; bringUp = HIGH;
-            stArray[st]->setCurrentPosition(0);
+          if (stretchValue > 2 && gotStretchFlag==HIGH) { // as bring down, check for stretch value return
+            bringDown = LOW; bringUp = HIGH; // switch bring down to bring up
+            stArray[st]->setCurrentPosition(0); // set current position to 0 (for relative position)
           }
         }
 
-        if (bringUp == HIGH) {
-          stArray[st]->setMaxSpeed(10);
-          stArray[st]->setAcceleration(10);
-          stArray[st]->moveTo(-50);
+        if (bringUp == HIGH) { // bring the motor up (flag is set during bring down)
+          stArray[st]->setMaxSpeed(10); // slow
+          stArray[st]->setAcceleration(10); // matching acceleration
+          stArray[st]->moveTo(-50); // stop at -50 (in case of error)
           stArray[st]->run();
           
-          if (gotStretchFlag == HIGH || stArray[st]->distanceToGo() == 0) {
-            if (stretchValue < 0.5) {
+          if (gotStretchFlag == HIGH ) {
+            if (stretchValue < 0.5 || stArray[st]->distanceToGo() == 0) {
               bringUp = LOW;
               enableState[st] = HIGH;
               MotorInited[st] = HIGH;
               beginMotorInitFlag[st] = LOW;
               MotorResetPosition(st);
               stArray[st]->setAcceleration(100000);
+              recievedMotorInitHandshake = LOW;
             }
           }
           gotStretchFlag = LOW;
@@ -829,7 +858,7 @@ void loop() {
           enableState[st] = HIGH; // disable motor
         }
       }
-      else {
+      else if (MotorInited[st] == HIGH) {
         stArray[st]->setMaxSpeed(abs(speedPhase[st][inPhase - 1])); // set speed to phase speed
         stArray[st]->moveTo(locPhase[st][inPhase]); // set position to phase destination
         stArray[st]->run();
@@ -848,9 +877,10 @@ void loop() {
     MovingCamera = LOW;
     if (ResetCameraFlag == HIGH) {
       ResetCameraFlag = LOW;
-      stCamera.setCurrentPosition(-3200);
+      stCamera.setCurrentPosition(1000);
       CameraMove(0);
-      // CameraUnderWell = 1;
+      CameraUnderWell = 3;
+      OMV.println("3#CHANGE");
     }
     enableStateCamera = LOW; digitalWrite(ENCAMERA, !enableStateCamera); digitalWrite(SLPCAMERA, enableStateCamera);
   }
@@ -878,6 +908,10 @@ void loop() {
       Serial.print(t_camera);
       Serial.print('&');
       Serial.print(CameraUnderWell);
+      Serial.print('&');
+      Serial.print(MotorInitWell);
+      Serial.print('&');
+      Serial.print(recievedMotorInitHandshake);
       Serial.print('&');
       Serial.print(stretchValue);
       Serial.print('&');
@@ -907,6 +941,8 @@ void loop() {
         Serial.print(CameraInited[st]);
         Serial.print('&');
         Serial.print(enableState[st]);
+        Serial.print('&');
+        Serial.print(beginMotorInitFlag[st]);
         Serial.print(';');
         //            Serial.print(enableState[st]);
       }
