@@ -36,9 +36,12 @@ class DraggablePlot():
             print('1')
         else:
             x, y = zip(*sorted(self._points.items()))
-            print(x)
+            # print(x)
             print(y)
-            
+            x_points_list = list(x)
+            if x_points_list[-1] > 90:
+                x_points_list[-1] = 90
+            x = tuple(x_points_list)
             for i in range(1,len(x)):
                 x_distance = x[i]-x[i-1]
                 if x_distance < 10:
@@ -51,6 +54,7 @@ class DraggablePlot():
                 self._line, = self._axes.plot(x, y, "b", marker="o", markersize=10)
             # Update current plot
             else:
+                self._points = dict(zip(x,y))
                 self._line.set_data(x, y)
         
         

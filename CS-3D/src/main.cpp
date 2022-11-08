@@ -887,7 +887,7 @@ void loop() {
 
   gotStretchFlag = LOW;
   // TIMER UPDATE
-  if (timerSerial > 50 * 1000) {
+  if (timerSerial > 25 * 1000) {
     if (HELPERFLAG == HIGH) {
       Serial.flush();
       Serial.print("HELPER");

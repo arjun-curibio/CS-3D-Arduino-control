@@ -99,7 +99,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     updatePostCentroid = False
     updateMagnetThreshold = False
     
-    n_hysteresis = 20
+    n_hysteresis = 5
     
     HELPERFLAG = False
     HELPERMASK = "POST"

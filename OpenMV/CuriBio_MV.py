@@ -23,7 +23,7 @@ class Serial:
         current_well, command, info = 0, '', []
         #print('reading')
         val = self.uart.read()
-        print(val)
+        #print(val)
         if val is not None:
             if len(val) > 4 and len(val) < 200:
                 #print(len(val))
@@ -237,7 +237,7 @@ class MaxTracker:
         max_freq = 6.0  # in Hz
         self.min_dt = 1000.0 / max_freq  # in milliseconds per cycle
 
-        self.hysteresis = 0.8
+        self.hysteresis = 1
         self.n_hysteresis = n_hysteresis
         self.count = -1  # Number of values processed
         self.hysteresis_signal = [] # Last 20 signal values (used to apply hysteresis-based max finding)
@@ -276,7 +276,7 @@ class MaxTracker:
         if len(self.hysteresis_signal) > 3:
             std = np.std(self.hysteresis_signal)
             self.avg_filter = np.mean(self.hysteresis_signal)
-            self.hysteresis = max(std, 0.5)  # Don't allow std to go below 0.5
+            self.hysteresis = max(std, 2)  # Don't allow std to go below 0.5
             
         
         # Follow max up
