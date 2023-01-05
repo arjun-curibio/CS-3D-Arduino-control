@@ -5,7 +5,7 @@
 #
 # Version: 2022_07_15
 
-import sensor, image, time, math, mjpeg
+import sensor, image, time, math, mjpeg, rpc
 import CuriBio_MV as cb
 import utime
 from pyb import Pin, LED, UART
@@ -61,12 +61,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     
     CircularBufferSize = 3
     tracker = cb.PostAndMagnetTracker(fps, nframes, thresh_range, area_range, roi_post = ROI_post, roi_magnet = ROI_magnet, CircularBufferSize=CircularBufferSize)
-
-    if outfile is not None:
-        output = mpeg.Mjpeg(outfile)
-    else:
-        output = None
-
+    
     print("\nmilliseconds\tstretch_percent\tbeat_freq\tlast_max_stretch\tfps")  # tab-delimited header
     frame_rate = 0
     t0 = utime.ticks_ms()
@@ -113,7 +108,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     # for i in range(0, nframes):
     
     postManualFlag = True
-    postManual = (100,250)
+    postManual = (53,237)
     
     extra_fb = sensor.alloc_extra_fb(sensor.width(), sensor.height(), sensor.GRAYSCALE)
     extra_fb.replace(sensor.snapshot())
@@ -146,7 +141,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             elif command=='POSTMANUALTOGGLE':
                 postManualFlag = int(info[0])
             elif command=='POSTMANUAL':
-                postManual = (int(info[0], int(info[1])))
+                postManual = (int(info[0]), int(info[1]))
             elif command=='RESET':
                 initFlag = [False, False, False, False] # triggers high if need to init tracker
                 isInit = [False, False, False, False]

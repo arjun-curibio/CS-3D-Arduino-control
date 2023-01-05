@@ -17,13 +17,14 @@ class Serial:
             self.simulationMode = False
             self.uart = UART(pin, baudrate, timeout=timeout)
             self.uart.init(baudrate, timeout=timeout)
+            #self.uart.CameraSpeed
     
     def read(self):
         val = ''
         current_well, command, info = 0, '', []
         #print('reading')
         val = self.uart.read()
-        #print(val)
+        print(val)
         if val is not None:
             if len(val) > 4 and len(val) < 200:
                 #print(len(val))
