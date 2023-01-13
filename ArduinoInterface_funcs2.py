@@ -29,9 +29,11 @@ class MotorState:
         pass
 
     def displayState(self):
+        # print("ID: {}: p: {} steps\tenabled: {}\tMotorInited: {}\tCameraInited: {}\tMotorInitState: {}".format(
+        #     self.ID, self.p, int(self.enableState), True if self.MotorInitedFlag > 0 else False, True if self.CameraInitedFlag > 0 else False, int(self.MotorInitState)))
         print("ID: {}: p: {} steps\tenabled: {}\tMotorInited: {}\tCameraInited: {}\tMotorInitState: {}".format(
-            self.ID, self.p, int(self.enableState),True if self.MotorInitedFlag > 0 else False, True if self.CameraInitedFlag > 0 else False, int(self.MotorInitState)))
-
+            self.ID, self.p, int(self.enableState), self.MotorInitedFlag, self.CameraInitedFlag, int(self.MotorInitState)))
+        
     
 class CS3D_GUI:
     def __init__(self, root, ser=None):
@@ -47,10 +49,10 @@ class CS3D_GUI:
 
         pygame.init()
         self.screen = pygame.display.set_mode((640,480), pygame.DOUBLEBUF)
-
+        self.gotImage = False
         self.Clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont("monospace", 15)
-        
+        self.font = pygame.font.SysFont("monospace", 33)
+        self.imageMessage = None
         self.t = 0
         self.activeMotor = 1
         self.WellLocations = [0, 4000, 7900, 11800]
@@ -448,11 +450,6 @@ class CS3D_GUI:
         string = "MOTORINIT&" + str(self.well)
         self.writeToSerial(string+' \n')
         self.messageScreen('Initializing Motor...', end='')
-        # self.writeToSerial("INIT"+'\n')
-        self.waitforBringUp = True
-        # self.root.after(1000)
-        # self.writeToSerial(string+'\n')
-        # self.messageScreen('Initializing Successful.')
     def retractAllMotors(self):
         for i in range(4):
             self.writeToSerial('X'+str(i)+'\n')
@@ -498,7 +495,7 @@ class CS3D_GUI:
             self.saveLabel.update()
     def INITCAMERA(self):
         string = 'INIT'
-        self.writeToSerial(string+'\n\n')   
+        self.writeToSerial(string+' \n')   
     def plotWaveform(self):
         # the figure that will contain the plot
         
@@ -513,18 +510,15 @@ class CS3D_GUI:
         
         if hold < rise+10 or fall < hold+10:
             return
-        if fall > 90:
-            return
-        if rise < 10:
-            return
+        if fall > 90: return
+        if rise < 10: return
         # list of squares
-        if freq != 0:
-            t = 1/freq
-        elif freq > 4:
-            freq = 4
-            t = 1/freq
-        elif freq <= 0:
-            t=0.25
+
+
+        freq = 4 if freq > 4 else freq
+        freq = 0.25 if freq <= 0 else freq
+        t = 1/freq
+        
         x = [0, rise, hold, fall, 100]
         y = [0, stretch, stretch, 0, 0]
         # adding the subplot
@@ -558,7 +552,7 @@ class CS3D_GUI:
         self.output.set('')
         self.Output.update()
     def EnableDisable(self):
-        if self.motorEnableState[self.well] == 1 and self.motorInited[self.well] == True:
+        if self.motorEnableState[self.well] == 1 and self.MotorStates[self.well].MotorInitedFlag == True:
             string = 'M'+str(self.well)
             self.writeToSerial(string+'\n')
         elif self.motorEnableState[self.well] == 0:
@@ -603,28 +597,41 @@ class CS3D_GUI:
                 
                 for i in range(4):
                     motorID, motorT, position, dist, freq, passive_len, MotorInited, CameraInited, enableMotorState, beginMotorInitFlag = tuple(map(float,self.values[0].split('&')))
+                    self.values.pop(0)
                     # Update MotorStates
                     self.positions[i] = int(position)
                     self.MotorStates[i].p = int(position)
                     self.MotorStates[i].d = int(dist)
-                    self.MotorStates[i].f = int(freq)
-                    self.MotorStates[i].enableState= enableMotorState
-                    self.MotorStates[i].MotorInitedFlag = MotorInited
-                    self.MotorStates[i].CameraInitedFlag = CameraInited
-                    self.MotorStates[i].MotorInitState = beginMotorInitFlag
+                    self.MotorStates[i].f = freq
+                    self.MotorStates[i].enableState= int(enableMotorState)
+                    self.MotorStates[i].MotorInitedFlag = int(MotorInited)
+                    self.MotorStates[i].CameraInitedFlag = int(CameraInited)
+                    self.MotorStates[i].MotorInitState = int(beginMotorInitFlag)
 
-                    if i == int(self.well):
+                    if i == int(self.well): # CURRENT WELL STUFF
                         self.MotorStates[i].displayState()
+                        
                         if self.waitforBringUp == True:
                             if int(MotorInited) == 1:
                                 self.waitforBringUp = False
-                                print("Motir Initialization Success.")
+                                print("Motor Initialization Success.")
                                 self.messageScreen('Motor Initialization Success.')
                         if int(CameraInited) == 1:
                             self.InitCameraButton.configure(text='Re-initialize\nFeedback')
                         else:
                             self.InitCameraButton.configure(text='Initialize\nFeedback')
                         
+                        if self.MotorStates[i].MotorInitedFlag == 1:
+                            self.homeMotorButton.configure(text='Re-home Motor')
+                        else:
+                            self.homeMotorButton.configure(text='Home Motor')
+                        
+                        if self.feedbackActiveFlag[i] == True:
+                            self.applyFeedbackFunc()
+                        else:
+                            pass
+                    # val = "D"+str(self.well)+','+str(self.dist_num[self.well])
+                    # print(val)
 
                     # print("{},{}".format(self.beginMotorInitFlag[i],beginMotorInitFlag))
                     if self.beginMotorInitFlag[i] == 1:
@@ -638,21 +645,12 @@ class CS3D_GUI:
                     self.motorInited[i] = int(MotorInited)
                     # self.motorInited[i] = 1
 
-                    
-                    self.cameraInited[i] = int(CameraInited)
-                    # self.cameraInited[i] = True
-                    
-                        # self.feedbackButton.configure(state='disabled')
-                    
                     # if self.feedbackActiveFlag[i] == True and i == int(self.well):
                     #     # self.feedbackButton.configure(text='Disable\nFeedback')
                     # elif self.feedbackActiveFlag[i] == False and i == int(self.well):
                         # self.feedbackButton.configure(text='Enable\nFeedback')
                     
-                    if self.motorInited[i] == 1 and i == int(self.well):
-                        self.homeMotorButton.configure(text='Re-home Motor')
-                    elif i == int(self.well):
-                        self.homeMotorButton.configure(text='Home Motor')
+                    
                     
                     if self.motorInited[i] == 1:
                         self.startStopIndividualMotor[i].configure(state='normal')
@@ -672,13 +670,7 @@ class CS3D_GUI:
                     #     self.homeMotorButton.configure(state='disabled')
                     # else:
                     #     self.homeMotorButton.configure(state='normal')
-                    self.values.pop(0)
-                    if self.feedbackActiveFlag[int(self.well)] == True and int(self.well) == i:
-                        # self.positions[i].set('Stretch: {} %'.format(self.stretch))
-                        pass
-                    else:
-                        # self.positions[i].set('Current position: {} steps'.format(position))
-                        pass
+                    
                     self.freqsLong[i].set('Frequency: {} Hz'.format(freq))
                     self.dists[i].set('Distance: {} steps'.format(dist))
                     self.dist_num[i] = int(dist)
@@ -691,27 +683,12 @@ class CS3D_GUI:
                     #     self.enable[i].set('Enabled')
                     #     self.enableLabel[i].configure(foreground='red')
                     
-                    val = 'Motor Homed: '
-                    if int(MotorInited) == 1: val += 'Y, '
-                    else: val += 'N, ' 
-                    val += 'Camera Inited: '
-                    if int(CameraInited) == 1: val += 'Y'
-                    else: val += 'N'
-                    if self.feedbackActiveFlag[i] == False:
-                        val+="\nFeedback: Not Active"
-                    elif self.feedbackActiveFlag[i] == True:
-                        if self.motorEnableState[i] == 1:
-                            val += "\nMotor Off"
-                        else:
-                            if self.reachedDesiredStretch[i] == False:
-                                val+="\nFeedback: N"
-                            else:
-                                val+="\nFeedback: Y"
+                    
                     # if int(MotorInited) == 1:
                     #     self.EnableDisableButton.configure(state='normal')
                     # else:
                     #     self.EnableDisableButton.configure(state='disabled')
-                    self.enable[i].set(val)
+                    # self.enable[i].set(val)
                     
                     # print("{0},{1}".format(self.motorT[i-n_before_motors], self.positions[i-n_before_motors].get()), end=' // ')
                     
@@ -762,8 +739,17 @@ class CS3D_GUI:
             # if val != "":
             #     print(self.getOpenMVSerial())
         
-        # update display
-        pygame.display.flip()
+            # update display
+            if self.gotImage == True:
+                pygame.display.flip()
+                self.gotImage = False
+            # print(pyopenmv.script_running())
+            if not pyopenmv.script_running():
+                self.imageMessage = "NOT RUNNING"
+                # self.screen.blit(image, (0, 0))
+            if self.imageMessage is not None:
+                self.screen.blit(self.font.render(self.imageMessage, 1, (255, 0, 0)), (0, 0))
+                pygame.display.flip()
 
 
         for event in pygame.event.get():
@@ -790,6 +776,7 @@ class CS3D_GUI:
     def getFrameBuffer(self):
         fb = pyopenmv.fb_dump()
         if fb != None:
+            self.gotImage = True
             # create image from RGB888
             image = pygame.image.frombuffer(fb[2].flat[0:], (fb[0], fb[1]), 'RGB')
             fps = self.Clock.get_fps()
@@ -799,6 +786,7 @@ class CS3D_GUI:
 
             # update display
             pygame.display.flip()
+            
             return image
         else:
             return None

@@ -28,11 +28,14 @@ class Serial:
         if val is not None:
             if len(val) > 4 and len(val) < 200:
                 #print(len(val))
-                val = val.decode('utf-8')
                 
-                info = val.split('#')[0].split('&')
-                current_well = int(info.pop(0))
-                command = info.pop(0)
+                try: 
+                    val = val.decode('utf-8')
+                    info = val.split('#')[0].split('&')
+                    current_well = int(info.pop(0))
+                    command = info.pop(0)
+                except:
+                    pass
         return current_well, command, info
     
     def write(self, string):
@@ -159,8 +162,6 @@ class makehgtform:
         new_rows = range(xymin[1], xymax[1])
         new_cols = range(xymin[0], xymax[0])
         return new_rows, new_cols
-
-
 class CircularBuffer:
     # Track values, resetting the signal after it reaches the end
     def __init__(self, buflen):
@@ -410,7 +411,7 @@ class CircularSignalTracker:
 class PostAndMagnetTracker:
 
     # added more initialization parameters
-    def __init__(self, fps, nframes, thresh_range, area_range, roi_post, roi_magnet, roi=(72, 420, 199, 270), CircularBufferSize=10):
+    def __init__(self, thresh_range, area_range, roi_post, roi_magnet, roi=(72, 420, 199, 270), CircularBufferSize=10):
         """ PostAndMagnetTracker Constructor
 
         tracker = PostAndMagnetTracker(thresh_range,area_range)
@@ -423,8 +424,6 @@ class PostAndMagnetTracker:
         n_hysteresis = 50
         self.maxTracker = MaxTracker(frames_to_plot, CircularBufferSize, n_hysteresis)
         
-        self.fps = fps
-        self.nframes = nframes
         self.thresh_range = thresh_range
         self.area_range = area_range
         self.roi_post = roi_post
@@ -436,15 +435,14 @@ class PostAndMagnetTracker:
 
 
         self.wait_until = 0
-        self.millisecs = frames_to_plot / fps * 1000 # Max number of milliseconds to plot
-
         # Determine good x-axis ticks
-        self.determine_best_xticks((0, self.millisecs))
 
         self.font_scale = 3
         self.image_scale = 3
         self.spring_constant = 0.159
-
+        
+        self.centroid_m = None
+        self.centroid_p = None
         self.automatic_thresh = False  # Automatically determine the thresholds
         self.stats_m = None
         self.centroid_p = [0,0]
@@ -486,7 +484,7 @@ class PostAndMagnetTracker:
         self.fps = fps
 
     # This should be private
-    def initPassive(self, img, stats_m, stats_p, postManualFlag, postManual):
+    def initPassive(self, stats_m, stats_p, postManualFlag, postManual):
         title_height = 80
         left_padding = 120
         right_padding = 120
@@ -843,6 +841,8 @@ class PostAndMagnetTracker:
         
         value = self.value
         if sum(self.centroid_p) != 0:
+            #print(self.centroid_p)
+            #print(self.centroid_m)
             dist_current = np.linalg.norm(self.centroid_m - self.centroid_p)
             twitch_deflection = dist_current - self.dist_neutral
             self.twitch_deflection = twitch_deflection
@@ -1463,6 +1463,9 @@ def locate_magnet(img, thresh_range, area_range, roi=(0,0,sensor.width(), sensor
 
     # Filter results by area
     stats_m = FilterByArea(stats_m, area_range[0])
+    #[print("{},{},{}".format(i.extent(), getAspectRatio(i), i.pixels())) for i in stats_m]
+    
+    #print("\n")
     # areas = GetAreas(stats_m)
     # if len(areas) > 0:
     #     print("  filtered magnet areas from %.0f to %.0f (n=%d)" % (min(areas), max(areas), len(areas)))
@@ -1471,10 +1474,10 @@ def locate_magnet(img, thresh_range, area_range, roi=(0,0,sensor.width(), sensor
     # stats_m = FilterByROI(stats_m, roi_x, roi_y)
 
     # Filter by aspect ratio (expect tall approx 5:2 filter those below 0.9)
-    stats_m = FilterByAspectRatio(stats_m, aspectratio)
+    #stats_m = FilterByAspectRatio(stats_m, aspectratio)
 
     # Filter by extent (filter those below 0.6)
-    stats_m = FilterByExtent(stats_m, extent)
+    #stats_m = FilterByExtent(stats_m, extent)
 
     # Order by Extent
     stats_m = OrderByExtent(stats_m)
