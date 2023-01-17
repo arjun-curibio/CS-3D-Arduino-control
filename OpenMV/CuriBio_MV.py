@@ -44,6 +44,32 @@ class Serial:
 
 # import random
 
+class Centroid: # Class to hide a centroid inside something that acts like a stats_p or stats_m
+    def __init__(self, centroid):
+        # centroid is (x,y)
+        self.centroid = centroid
+        self.radius = 50
+        self.stats = [] # set empty for now
+    def set_enclosing_circle(self, xyr):
+        self.centroid = (xyr[0], xyr[1])
+        self.radius = xyr[2]
+    def cx(self):
+        return self.centroid[0]
+    def cy(self):
+        return self.centroid[1]
+    def pixels(self):
+        if len(self.stats) > 0:
+            return self.stats[0].area() # returning area
+        else:
+            return 0  # We can use this to skip over the default_post_centroid plotting
+    def get_centroid(self):
+        return self.centroid
+    def get_enclosing_circle(self):
+        return (self.centroid[0], self.centroid[1], self.radius)
+    def set_stats(self, stats):
+        self.stats = stats
+    def get_stats(self):
+        return self.stats
 
 def eye():
     return np.array([[1.0, 0, 0, 0], [0, 1.0, 0, 0], [0, 0, 1.0, 0], [0, 0, 0, 1.0]])
@@ -54,114 +80,6 @@ def find_first(x):
     idx = x.view(bool).argmax() // x.itemsize
     return idx if x[idx] else -1
 
-
-class makehgtform:
-
-    def __init__(self, *args):
-        # args is a list
-        #  only the properties 'translate' and 'zrotate' are implemented
-        self.tform = eye()
-        if len(args) % 2 != 0:
-            raise RuntimeError("Non-even number of property-value pairs")
-
-        i = 0
-        while i < len(args):
-            key = args[i]
-            value = args[i + 1]
-            if key == "translate":
-                if len(value) == 3:
-                    T = eye()
-                    T[:3, 3] = value
-                    self.tform = np.dot(self.tform, T)
-                else:
-                    raise RuntimeError("translation value must be length 3")
-            elif key == "xrotate":
-                # Not implemented
-                raise RuntimeError("Not implemented")
-            elif key == "yrotate":
-                raise RuntimeError("Not implemented")
-            elif key == "zrotate":
-                # if len(value) == 1:
-                R = eye()
-                R[0, 0] = math.cos(value)  # value is in radians
-                R[0, 1] = -math.sin(value)
-                R[1, 0] = math.sin(value)
-                R[1, 1] = math.cos(value)
-                self.tform = np.dot(self.tform, R)
-                # else:
-                #     raise RuntimeError("zrotate value must be scalar")
-            elif key == "axisToRect":
-                # Value is (axis,rect) where axis is (xmin,xmax,ymin,ymax) and rect is (left,top,width,height)
-                # maps (xmin,ymax) to (left,top) and (xmax,ymin) to (left+width,top+height)
-                if len(value) == 2:
-                    axis = value[0]
-                    rect = value[1]
-                    T = eye()
-                    T[0, 0] = rect[2] / (axis[1] - axis[0])
-                    T[1, 1] = rect[3] / (axis[2] - axis[3])
-                    T[0, 3] = rect[0] - T[0, 0] * axis[0]
-                    T[1, 3] = rect[1] - T[1, 1] * axis[3]
-                    self.tform = np.dot(self.tform, T)
-                else:
-                    raise RuntimeError("coordMap value must be 2-tuple")
-            elif key == "coordMap":
-                if len(value) == 2:
-                    # Value is (old_coord,new_coord) where old_coord is (xmin,xmax,ymin,ymin)_old and
-                    #                                      new_coord is (xmin,xmax,ymin,ymax)_new.
-                    # Maps (xmin,ymax)_old to (xmin,ymax)_new  and (xmax,ymin)_old to (xmax,ymin)_new
-                    old_coord = value[0]
-                    new_coord = value[1]
-                    T = eye()
-                    T[0, 0] = (new_coord[1] - new_coord[0]) / (old_coord[1] - old_coord[0])
-                    T[1, 1] = (new_coord[3] - new_coord[2]) / (old_coord[3] - old_coord[2])
-                    T[0, 3] = new_coord[0] - T[0, 0] * old_coord[0]
-                    T[1, 3] = new_coord[2] - T[1, 1] * old_coord[2]
-                    self.tform = np.dot(self.tform, T)
-                else:
-                    raise RuntimeError("coordMap value must be 2-tuple")
-            else:
-                raise RuntimeError("Unknown key: " + key)
-            i += 2
-
-    def apply2D(self, xy):
-        # Apply transform to 2-D point (assumes xy is 2-by-n)
-        if len(xy.shape) > 1:
-            n = xy.shape[1]
-            # print("xy=", xy, " n=", n)
-            xyc = (xy, np.zeros((1, n)), np.ones((1, n)))
-            # print("xyc=", xyc)
-            # print(xyc[0].shape, xyc[1].shape, xyc[2].shape)
-            vec = np.dot(self.tform, np.concatenate(xyc, axis=0))
-        else:
-            # print("xy=", xy)
-            n = len(xy)
-            xyc = (xy, np.array([0,]), np.array([1,]))
-            # print("xyc=", xyc)
-            # print(xyc[0].shape, xyc[1].shape, xyc[2].shape)
-            # xyc_cat = np.concatenate(xyc, axis=0)
-            # print(xyc_cat)
-            vec = np.dot(self.tform, np.concatenate(xyc, axis=0).T)
-        # print("vec=",vec)
-        return vec[:2]
-
-    def apply3D(self, xyz):
-        # Apply transform to 3-D point
-        vec = np.dot(self.tform, np.concatenate((xyz, np.array([1,1])), axis=0))  # hstack forms 3-D homogeneous point
-        return vec[:3]
-
-    def transformRect(self, rect):
-        xy_min = self.apply2D(np.array((rect[0], rect[1]))).astype(int)
-        xy_max = self.apply2D(np.array((rect[0] + rect[2], rect[1] + rect[3]))).astype(int)
-        new_rect = (xy_min[0], xy_min[1], xy_max[0] - xy_min[0], xy_max[1] - xy_min[1])
-        return new_rect
-
-    def transformRowsCols(self, rows, cols):
-        # Transform row and column range vectors
-        xymin = self.apply2D(np.array((cols[0], rows[0]))).astype(int)
-        xymax = self.apply2D(np.array((cols[-1], rows[-1]))).astype(int)
-        new_rows = range(xymin[1], xymax[1])
-        new_cols = range(xymin[0], xymax[0])
-        return new_rows, new_cols
 class CircularBuffer:
     # Track values, resetting the signal after it reaches the end
     def __init__(self, buflen):
@@ -209,10 +127,10 @@ class CircularBuffer:
             #return np.concatenate((first_part, second_part), axis=0)
         #else:
             #return self.buffer[:self.head]
-    #def reset(self):
-        #self.head = 0
-        #self.count = 0
-        #self.bufstart = 0
+    def reset(self):
+        self.head = 0
+        self.count = 0
+        self.bufstart = 0
 
 
 class MaxTracker:
@@ -351,11 +269,11 @@ class MaxTracker:
     def time(self):
         return self.milliseconds.signal()
 
-    def maximums(self) -> []:
+    def maximums(self):
         # value at signal maxes
         return self.maxes.signal()
 
-    def time_of_maximums(self) -> []:
+    def time_of_maximums(self):
         return self.max_times.signal()
 
     def last_max_signal(self):
@@ -384,7 +302,7 @@ class SignalTracker:
     def append(self, v):
         self.tracking.append(v)
 
-    def signal(self) -> []:
+    def signal(self):
         return self.tracking
 
     def reset(self):
@@ -454,6 +372,7 @@ class PostAndMagnetTracker:
         self.angle = None
         self.trans = None  # Rotation transform
         self.post_centroid = None
+        self.InitializedPostCentroid = None
         self.twitch_deflection = 0
 
         # Lazily initialized title and oscilloscope areas
@@ -475,8 +394,8 @@ class PostAndMagnetTracker:
         self.ylim_right = [10000.0,-10000.0]  # Outside expected range
         
         self.last_max_array = []
-        self.sizeROIx = 100
-        self.sizeROIy = 200
+        self.sizeROIx = 80
+        self.sizeROIy = 150
         self.sizeStats = 20
         self.smudgeFactor = 1.25
 
@@ -568,7 +487,12 @@ class PostAndMagnetTracker:
             if postManualFlag:
                 self.post_centroid = postManual
             else:
-                self.post_centroid = (stats_p[0].cx(), stats_p[0].cy())
+                if self.post_centroid != None:
+                    if len(self.post_centroid) ==0:
+                        self.post_centroid = None
+                        pass
+                    else:
+                        self.post_centroid = (stats_p[0].cx(), stats_p[0].cy())
             
 
             # Determine location of title rect
@@ -860,14 +784,14 @@ class PostAndMagnetTracker:
             #centroid_m, centroid_p, milliseconds, time_of_max, value = plotting_parameters
             #ret, annotated = self.showTrackingOscilloscope(img, centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
             #plotting_parameters = (centroid_m, centroid_p, self.maxTracker.time(), time_of_max, value)
-            if not postManualFlag:
-                for stat in stats_p:
-                    x,y,r = stat.enclosing_circle()
+            #if not postManualFlag:
+                #for stat in stats_p:
+                    #x,y,r = stat.enclosing_circle()
                     
-                    img.draw_circle(x,y,r,color=(0,255,0), thickness=2)
+                    #img.draw_circle(x,y,r,color=(0,255,0), thickness=2)
                     
-                    x,y,w,h = stat.rect()
-                    img.draw_rectangle(x,y,w,h,color=(255,255,0), thickness=4)
+                    #x,y,w,h = stat.rect()
+                    #img.draw_rectangle(x,y,w,h,color=(255,255,0), thickness=4)
             #print([100*i/self.dist_neutral for i in self.maxTracker.maxes.signal()])
         return value
         
@@ -1048,7 +972,7 @@ class PostAndMagnetTracker:
         #               1)
 
         # Draw centroid
-        img.draw_circle(int(centroid_m[0]), int(centroid_m[1]), 5, color=200, fill=True)  # marker
+        # img.draw_circle(int(centroid_m[0]), int(centroid_m[1]), 5, color=200, fill=True)  # marker
         img.draw_circle(int(centroid_p[0]), int(centroid_p[1]), 10, color=127, fill=True)  # marker
 
         return 0
@@ -1106,7 +1030,7 @@ def getBoundingBox(d):
     return d.rect()
 
 
-def determineThresholds(img, area_range, roi, roi_post, roi_magnet, visualize=False):
+def determineThresholds(img, area_range, roi, roi_post, roi_magnet, visualize=True):
     # determine segmentation thresholds via exhaustive search
     # returns thresh_range,area_range
 
@@ -1127,7 +1051,7 @@ def determineThresholds(img, area_range, roi, roi_post, roi_magnet, visualize=Fa
         data.append((i, len(stats_m), len(stats_p)))  # Remember number of blobs detected
         if visualize:
             VisualizeThresholdSearch(img, i, stats_m, stats_p)
-        print(stats_m)
+        print(stats_p)
 
     # Extract data
     idx = [x[0] for x in data]
@@ -1198,83 +1122,7 @@ def determineThresholds(img, area_range, roi, roi_post, roi_magnet, visualize=Fa
     return (thresh_m, thresh_p), area_range
 
 
-def thresholdFromVideo(vfile, visualize=False):
-    # Determine appropriate threshold from the first frame of video
-    thresh_range = ((0, 120), (0, 60))
-    area_range=((300, 800), (1500, 3000))
-    roi = (128, 553, 179, 366)
-
-    # Open video file
-    cap = cv2.VideoCapture(vfile)
-    nframes = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-
-    if nframes >= 1:
-        ret, frame = cap.read()
-        if ret:
-            thresh_range, area_range = determineThresholds(frame, area_range, roi, visualize=visualize)
-
-    cap.release()
-
-    return thresh_range, area_range
-
-
-def blob_properties(contours, min_area):
-    """ Compute blob statistics from contours
-        Produces a list of stats dictionaries (one for each contour)
-    """
-    stats = []
-    i = 0
-    for c in contours:
-        area = cv2.contourArea(c)
-        if area < min_area:
-            continue  # Go to next c
-
-        # perimeter = contours[0].size()
-        perimeter = cv2.arcLength(c, True)
-
-        # Compute centroid via moments
-        M = cv2.moments(c)
-        if M["m00"] != 0:
-            cX = M["m10"] / M["m00"]
-            cY = M["m01"] / M["m00"]
-        else:
-            cX, cY = 0, 0
-
-        # Statistics
-        x1, y1, w, h = cv2.boundingRect(c)
-        aspect_ratio = h / float(w)
-        rect_area = w * h
-        extent = float(area) / rect_area
-
-        if perimeter > 0:
-            circularity = 4 * math.pi * float(area) / (float(perimeter) * perimeter)
-        else:
-            circularity = 0
-
-        # (xa, ya), (MA, ma), angle = cv2.fitEllipse(cnt)
-        # rect = cv2.minAreaRect(cnt)
-        # (xc, yc), radius = cv2.minEnclosingCircle(cnt)
-        # ellipse = cv2.fitEllipse(cnt)
-        # rows, cols = img.shape[:2]
-
-        # Add parameters to list
-        props = {"id": i + 1,
-                 "Area": area,
-                 "Centroid": (cX, cY),
-                 "Perimeter": perimeter,
-                 "BoundingBox": (x1, y1, w, h),
-                 "AspectRatio": aspect_ratio,
-                 "RectArea": rect_area,
-                 "Extent": extent,
-                 "Circularity": circularity
-                 }
-        stats.append(props)
-        i += 1
-
-    return stats
-
-
-def FilterByArea(stats, area_range) -> []:
+def FilterByArea(stats, area_range):
     good = []
     for props in stats:
         area = props.area()
@@ -1284,7 +1132,7 @@ def FilterByArea(stats, area_range) -> []:
     return good
 
 
-def FilterByBlobColor(stats, bw) -> []:
+def FilterByBlobColor(stats, bw):
     good = []
     for props in stats:
         cx = props.cx()
@@ -1296,7 +1144,7 @@ def FilterByBlobColor(stats, bw) -> []:
     return good
 
 
-def FilterByExtent(stats, e) -> []:
+def FilterByExtent(stats, e):
     good = []
     for props in stats:
         extent = props.extent()
@@ -1306,7 +1154,7 @@ def FilterByExtent(stats, e) -> []:
     return good
 
 
-def FilterByAspectRatio(stats, ar) -> []:
+def FilterByAspectRatio(stats, ar):
     good = []
     for props in stats:
         aspect_ratio = getAspectRatio(props)
@@ -1316,7 +1164,7 @@ def FilterByAspectRatio(stats, ar) -> []:
     return good
 
 
-def FilterByCircularity(stats, circ, ar_range=(0.9, 1.1)) -> []:
+def FilterByCircularity(stats, circ, ar_range=(0.7, 1.4)):
     good = []
     for props in stats:
         # Expect circular blobs to be bounded by a "square" and high circularity
@@ -1328,7 +1176,7 @@ def FilterByCircularity(stats, circ, ar_range=(0.9, 1.1)) -> []:
     return good
 
 
-def FilterByROI(stats, roi_x, roi_y) -> []:
+def FilterByROI(stats, roi_x, roi_y):
     good = []
     for props in stats:
         cx = props.cx()
@@ -1354,49 +1202,23 @@ def GetAreas(stats):
         areas.append(blob.area())
     return np.array(areas)
 
-def OrderByExtent(stats) -> [{}]:
+def OrderByExtent(stats):
     """ Return sorted array of statistics dictionaries sorted by Extent property
     """
     sorted_stats = sorted(stats, key=ExtentKey, reverse=True)
     return sorted_stats
 
 
-def OrderByCircularity(stats) -> [{}]:
+def OrderByCircularity(stats):
     """ Return sorted array of statistics dictionaries sorted by Circularity property
     """
     sorted_stats = sorted(stats, key=CircularityKey, reverse=True)
     return sorted_stats
 
-
-def ShowCentroidsOnImage(img, stats):
-    for i in range(0, len(stats)):
-        centroid = np.array([stats[i].cx(),stats[i].cy()]).astype(int)
-        img.putText(img, "%d" % i, centroid, cv2.FONT_HERSHEY_SIMPLEX, 0.25, (0, 0, 255), 1)
-        # cv2.circle(img, centroid, 3, (0,0,255), 2)
-    cv2.imshow('Centroids on image', img)
-
-
-def ShowContours(contours, hierarchy, m, n):
-    # Useful for debugging the blob detection
-    dst = np.zeros((m, n, 3), dtype='uint8')
-    cv2.drawContours(dst, contours, -1, (0, 255, 0), 1)
-    cv2.imshow("Contours", dst)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
 def EstTextSize(str, scale=1.0):
     # Assume each letter fits inside 8x10 pixel box at scale=1
     n = len(str)
     return (int(n*scale*8), int(scale*10))  # (width, height) in pixels
-
-def ShowLabelImage(bw):
-    # show label image with the full range of colors
-    (numcomp, labels, stats, centroids) = cv2.connectedComponentsWithStats(bw)
-    lmat = np.zeros(labels.shape, dtype=np.uint8)
-    for i in range(0, numcomp):
-        lmat[labels == i] = i * 256 // numcomp
-    lmat = cv2.applyColorMap(lmat, cv2.COLORMAP_JET)
-    cv2.imshow('lmat', lmat)
 
 
 def VisualizeThresholdSearch(img, thresh, stats_m, stats_p):
@@ -1405,7 +1227,7 @@ def VisualizeThresholdSearch(img, thresh, stats_m, stats_p):
         img_copy = img.copy(copy_to_fb=True) # These lines place the
         bw = img_copy.binary([(0,thresh)])   # bw into the frame buffer
         bw = bw.to_rainbow()
-
+        utime.sleep_ms(200)
         for blob in stats_m:
             bw.draw_circle(blob.cx(), blob.cy(), 5, color=30, fill=True)  # marker
             if blob.elongation() < 0.5:
@@ -1433,9 +1255,9 @@ def VisualizeThresholdSearch(img, thresh, stats_m, stats_p):
             # bw.draw_keypoints([(blob.cx(), blob.cy(), int(blob.rotation_deg()))], size=40, color=127)
 
         bw.draw_string(20, 20, "%d" % thresh, scale=3, color=100, mono_space=False)  # Show the threshold
-        utime.sleep_ms(200)
+        
 
-def locate_magnet(img, thresh_range, area_range, roi=(0,0,sensor.width(), sensor.height()), aspectratio = (0.5,10), extent = 0.6) -> ({}, {}):
+def locate_magnet(img, thresh_range, area_range, roi=(0,0,sensor.width(), sensor.height()), aspectratio = (0.5,10), extent = 0.6):
     height = sensor.height()
     width = sensor.width()
 
@@ -1446,6 +1268,7 @@ def locate_magnet(img, thresh_range, area_range, roi=(0,0,sensor.width(), sensor
     # roi_y = np.array([0,1]) * (height - 1) + 1
     # roi_x = np.array([0.25, .75]) * (width - 1) + 1
     # roi_y = np.array([0, 1]) * (height - 1) + 1
+    print(roi)
     roi_x = (roi[0], roi[1])
     roi_y = (roi[2], roi[3])
 
@@ -1484,7 +1307,7 @@ def locate_magnet(img, thresh_range, area_range, roi=(0,0,sensor.width(), sensor
 
     return stats_m
 
-def locate_post(img, thresh_range, area_range, roi, circularity=0.5) -> ({}, {}):
+def locate_post(img, thresh_range, area_range, roi, circularity=0.5):
     height = sensor.height()
     width = sensor.width()
 
@@ -1501,7 +1324,11 @@ def locate_post(img, thresh_range, area_range, roi, circularity=0.5) -> ({}, {})
     #
     # post detector
     #
-    stats_p = img.find_blobs( [thresh_range[1]], pixels_threshold=area_range[1][0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]), x_stride=5, y_stride=5)
+    if thresh_range[1] == None:
+        thresh_to_use = (0,15)
+    else:
+        thresh_to_use = thresh_range[1]
+    stats_p = img.find_blobs( [thresh_to_use], pixels_threshold=area_range[1][0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]), x_stride=5, y_stride=5)
     got_one = len(stats_p) > 0
     # print("--- stats_p ---")
     # print(stats_p)
