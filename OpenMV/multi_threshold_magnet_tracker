@@ -1,0 +1,109 @@
+# Untitled - By: achar - Tue Jan 17 2023
+
+import sensor, image, time
+
+sensor.reset()
+sensor.set_pixformat(sensor.GRAYSCALE)
+sensor.set_framesize(sensor.VGA)
+sensor.skip_frames(time = 2000)
+sensor.set_auto_gain(False) # must be turned off for color tracking
+sensor.set_auto_whitebal(False) # must be turned off for color tracking
+    
+clock = time.clock()
+def ExtentKey(x):
+    return x.extent()
+
+def FilterByArea(stats, area_range) -> []:
+    good = []
+    for props in stats:
+        area = props.area()
+        if area_range[0] <= area <= area_range[1]:
+            good.append(props)
+    return good
+def FilterByROI(stats, roi_x, roi_y) -> []:
+    # roi_x = (xmin,xmax)
+    # roi_y = (ymin,ymax)
+    good = []
+    for props in stats:
+        cx = props.cx()
+        cy = props.cy()
+        if (roi_x[0] <= cx <= roi_x[1]) and (roi_y[0] <= cy <= roi_y[1]):
+            good.append(props)
+    return good
+def FilterByAspectRatio(stats, ar):
+    good = []
+    for props in stats:
+        aspect_ratio = getAspectRatio(props)
+        if aspect_ratio >= ar[0] and aspect_ratio <= ar[1]:
+            good.append(props)
+    return good
+def getAspectRatio(d):
+    return float(d.w()) / float(d.h())
+
+def FilterByExtent(stats, e) -> []:
+    good = []
+    for props in stats:
+        extent = props.extent()
+        if extent >= e:
+            good.append(props)
+    return good
+
+def OrderByExtent(stats) -> [{}]:
+    """ Return sorted array of statistics dictionaries sorted by Extent property
+    """
+    sorted_stats = sorted(stats, key=ExtentKey, reverse=True)
+    return sorted_stats
+def OrderByCircularity(stats) -> [{}]:
+    """ Return sorted array of statistics dictionaries sorted by Circularity property
+    """
+    sorted_stats = sorted(stats, key=CircularityKey, reverse=True)
+    return sorted_stats
+def FilterByCircularity(stats, circ, ar_range=(0.9, 1.1), ar_defn='w/h') -> []:
+    good = []
+    for props in stats:
+        # Expect circular blobs to be bounded by a "square" and high circularity
+        circularity = props.roundness()
+        if ar_defn == 'w/h':
+            aspect_ratio = props.w() / props.h()
+        else:
+            aspect_ratio = props.h() / props.w()
+        if circularity >= circ and ar_range[0] < aspect_ratio < ar_range[1]:
+            good.append(props)
+    return good
+
+def locate_magnet(img, thresh_range, area_range, roi=(0,0,sensor.width(), sensor.height()), aspectratio = (0.5,10), extent = 0.6):
+    height = sensor.height()
+    width = sensor.width()
+
+    roi_x = (roi[0], roi[1])
+    roi_y = (roi[2], roi[3])
+
+    stats_m = img.find_blobs( [thresh_range], pixels_threshold=area_range[0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]))
+    
+    # Filter results by area
+    #stats_m = FilterByArea(stats_m, area_range)
+    stats_m = FilterByAspectRatio(stats_m, aspectratio)
+
+    # Filter by extent (filter those below 0.6)
+    stats_m = FilterByExtent(stats_m, extent)
+
+    # Order by Extent
+    stats_m = OrderByExtent(stats_m)
+
+    return stats_m
+
+i_start = 25
+while(True):
+    clock.tick()
+    img = sensor.snapshot()
+    max_i = i_start + 5
+    for i in range(i_start-5,i_start+5):
+        stats_m = locate_magnet(img, (0, i), (1500, 3000), (250, 680, 160, 320), (1,2), 0.6)
+        if len(stats_m) > 0:
+            best = stats_m[0]
+            img.draw_circle(best.cx(), best.cy(), 3, color=[255,255,255], fill=True)
+            print('{}, '.format(i), end='')
+            max_i = i
+    print(" /// {}, {}, {} ".format(max_i, i_start, clock.fps()))
+    i_start = max_i-4
+    

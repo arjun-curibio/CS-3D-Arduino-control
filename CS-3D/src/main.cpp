@@ -71,7 +71,7 @@ int MotorInitWell = 0;
 // CAMERA VARIABLES
 int     CameraUnderWell         = 0; // WHICH WELL THE CAMERA IS UNDER
 boolean MovingCamera            = LOW; // WHETHER OR NOT THE CAMERA IS MOVING
-int     CameraSpeed             = 2500; // SPEED OF CAMERA MOTOR (steps/s)
+int     CameraSpeed             = 2000; // SPEED OF CAMERA MOTOR (steps/s)
 int     CameraResetPosition     = -3000; // WALL POSITION FOR CAMERA RESET (steps)
 int     CameraStartingPosiiton  = 1200; // POSITION AWAY FROM WALL (steps)
 int     CameraPosition          = 0; // CURRENT POSITION OF CAMERA (steps)
@@ -799,6 +799,7 @@ void loop() {
 
   // MOTOR UPDATE
   for (int st = 0; st < 4; st++) {
+    // enableState[st] = LOW;
     digitalWrite(EN[st], enableState[st]);
 
     if (timers[st] > period[st])  { // RESET TIMER IF PAST PERIOD LENGTH
@@ -813,9 +814,7 @@ void loop() {
     }
 
 
-    int inPhase = 4;
-    inPhase = checkPhase(timers[st], ts[st]);
-
+    
     if (enableState[st] == LOW) { // MOTOR IS ENABLED
       /*
       Order by priority: 
@@ -825,6 +824,7 @@ void loop() {
         4. Manual override of position
         5. Normal cycling
       */
+      // MotorInited[st] = HIGH;
       if (motorRetractFlag[st] == HIGH) { // EMERGENCY RETRACT
         stArray[st]->moveTo(-2000); // MOVE ARBITRARILY BACK
         stArray[st]->setMaxSpeed(5000); // SET HIGH SPEED
@@ -835,6 +835,7 @@ void loop() {
           MotorResetPosition(st);
         }
       }
+      
       else if (motorInitState[st] > 0) { // Do something if it's not 0 or -1
         switch (motorInitState[st]) {
           case 0: // Somehow got through if-else condition
@@ -927,7 +928,9 @@ void loop() {
           enableState[st] = HIGH; // disable motor
         }
       }
-      else if (MotorInited[st] == HIGH) {
+      else { //if (MotorInited[st] == HIGH) {
+        int inPhase = 4;
+        inPhase = checkPhase(timers[st], ts[st]);
         stArray[st]->setMaxSpeed(abs(speedPhase[st][inPhase - 1])); // set speed to phase speed
         stArray[st]->moveTo(locPhase[st][inPhase]); // set position to phase destination
         stArray[st]->run();

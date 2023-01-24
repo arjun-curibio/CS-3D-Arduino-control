@@ -84,7 +84,7 @@ class CS3D_GUI:
 
         self.saveDataFlag = False
         self.applyFeedback = "Cyclic"
-        self.feedbackActiveFlag = [True,True,True,True]
+        self.feedbackActiveFlag = [False,False,False,False]
         self.counter = 0
         self.almostCounter = 0
         self.reachedDesiredStretch = [False, False, False, False]
@@ -225,7 +225,7 @@ class CS3D_GUI:
             # self.moveToButtons[-1].configure(command=moveTo)
             # self.retractButton[-1].configure(command=retractMotor)
 
-            self.motorFrames[-1].place(bordermode=tk.OUTSIDE, height=100, width=300, x=0, y=i*105)
+            self.motorFrames[-1].place(bordermode=tk.OUTSIDE, height=100, width=300, x=0, y=315-(i*105))
             # # self.moveToButtons[-1].place(relwidth=0.3, relheight=0.5, relx=0.7, rely=0.05)
             # # self.retractButton[-1].place(relwidth=0.3, relheight=0.2, relx=0.7, rely=0.85)
             # self.positionLabels[-1].place(relx=0.1, rely=0)
@@ -256,7 +256,7 @@ class CS3D_GUI:
         self.freqEntry      = self.addEntryWidget(self.waveformroot, textvariable=self.freqs[0], location=[10,130, 30, 25], fontsize=10)
         self.stretchEntry   = self.addEntryWidget(self.waveformroot, textvariable=self.desiredStretchMotor[0], location=[10,160,30,25], fontsize=10)
         
-        tk.Scale(self.root, from_ = -1000, to=1000, variable = self.pos, command=self.sendPosition).pack()
+        # tk.Scale(self.root, from_ = -1000, to=1000, variable = self.pos, command=self.sendPosition).pack()
         
         self.plotWaveform()
         self.waveformtitle = self.addLabelWidget(self.waveformroot, text='Row {}'.format(self.wellLabels[0]), location=[0,0,150,35], fontsize=12, justify=tk.CENTER)
@@ -570,7 +570,8 @@ class CS3D_GUI:
         else:
             string, magic = self.readFromSerial()
             if magic != '-33' and magic != '-47':
-                print(magic)
+                # print(magic)
+                pass
             # print(string)
             # print(self.feedbackActiveFlag)
             self.values = string.split(';')
@@ -608,6 +609,7 @@ class CS3D_GUI:
                     self.MotorStates[i].CameraInitedFlag = int(CameraInited)
                     self.MotorStates[i].MotorInitState = int(beginMotorInitFlag)
 
+                    self.MotorStates[i].MotorInitedFlag = 1
                     if i == int(self.well): # CURRENT WELL STUFF
                         self.MotorStates[i].displayState()
                         
@@ -651,7 +653,7 @@ class CS3D_GUI:
                         # self.feedbackButton.configure(text='Enable\nFeedback')
                     
                     
-                    
+                    self.motorInited[i] = 1
                     if self.motorInited[i] == 1:
                         self.startStopIndividualMotor[i].configure(state='normal')
                         self.startStopIndividualMotor[i].configure(bg='green')
@@ -711,7 +713,8 @@ class CS3D_GUI:
                 # self.canvas.draw()
 
                 if self.feedbackActiveFlag[int(self.well)] == True:
-                    self.applyFeedbackFunc()
+                    pass
+                    # self.applyFeedbackFunc()
                 else:
                     pass
                     # val = "D"+str(self.well)+','+str(self.dist_num[self.well])
@@ -863,7 +866,7 @@ class EstablishConnections:
         self.ArduinoConn = None
         self.ArduinoConnected = True
         self.OMVConnected=False
-
+        self.conn = None
         k=0
         for port, desc, hwid in comports():
             print("{}: {} / {} ".format(port, desc, hwid))
@@ -898,6 +901,7 @@ class EstablishConnections:
                     print('Connected to Arduino! ')
                     continue
                 except:
+                    self.conn = None
                     print('Tried to connect but failed.  Trying another or exiting.')
                     continue
         

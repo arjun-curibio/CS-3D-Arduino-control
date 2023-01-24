@@ -9,6 +9,7 @@ import sensor, image, time, math, mjpeg, rpc, omv
 import CuriBio_MV as cb
 import utime
 from pyb import Pin, LED, UART
+from ulab import numpy as np
 
 # omv.disable_fb()
 pin7 = Pin('P7', Pin.IN, Pin.PULL_UP)  # Connected to pin 7
@@ -58,7 +59,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     nframes = 30*fps  # Process 30 seconds worth
 
     ROI_post = (0, 250, 160, 320) # x1, y1, x2, y2
-    ROI_magnet = (250, sensor.width(), 160, 320) # x1, y1, x2, y2
+    ROI_magnet = (250, 600, 160, 320) # x1, y1, x2, y2
     
     CircularBufferSize = 3
     tracker = cb.PostAndMagnetTracker(thresh_range, area_range, roi_post = ROI_post, roi_magnet = ROI_magnet, CircularBufferSize=CircularBufferSize)
@@ -76,6 +77,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     centroid_p          = [(0,0),       (0,0),      (0,0),      (0,0)]
     centroid_m_passive  = [(0,0),       (0,0),      (0,0),      (0,0)]
     centroid_p_passive  = [(0,0),       (0,0),      (0,0),      (0,0)]
+    
     post_thresh         = [post_thresh_init,post_thresh_init,post_thresh_init,post_thresh_init]
     magnet_thresh       = [magnet_thresh_init,magnet_thresh_init,magnet_thresh_init,magnet_thresh_init]
     
@@ -88,23 +90,21 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     plotting_parameters = (centroid_m, centroid_p, milliseconds, time_of_max, value)
     passiveLengthCalcFlag = False
     passive_deflection = 0
-
-
+    
+    
+    area = tracker.area_range[0]
+    extent = 0.7
+    apectratio = 1.5
+    magnet = None
+    
     initFlag = [False, False, False, False] # triggers high if need to init tracker
     isInit = [False, False, False, False]
     updatePostCentroid = False
     
     n_hysteresis = 5
-    
+    ScreenMessage = [None, None, None, None]
     HELPERFLAG = False
     HELPERMASK = "POST"
-    helper_magnet_thresh = (20,50)
-    helper_post_thresh = (0,10)
-    helper_magnet_area = (1500,3000)
-    helper_post_area = (0,25000)
-    helper_magnet_extent = 0.2
-    helper_magnet_aspectratio = (0.9,10)
-    helper_post_circularity = 0.4
     # for i in range(0, nframes):
     
     postManualFlag      = [     True,       True,       True,       True]
@@ -120,7 +120,6 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     # for i in range(0, nframes):
     while True:
         clock.tick()
-        
         tic = utime.ticks_ms() - t0        
         img = sensor.snapshot()
         # img.draw_string(50,100,"test")
@@ -128,18 +127,20 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
         if uart.simulationMode == False:
             temp, command, info = uart.read()
             if command=='INIT':
-                print(current_well)
-                print(wellLabels[current_well])
+                # print(current_well)
+                # print(wellLabels[current_well])
                 initFlag[current_well] = True
                 current_well = temp
-                img.draw_string(25, 100, "CAMERA INITIALIZING", scale=4)
+                
             elif command=='CHANGE':
                 # set magnet threshold variable to what the tracker is currently
                 magnet_thresh[current_well] = tracker.thresh_range[0]
                 post_thresh[current_well] = tracker.thresh_range[1]
+                centroid_m[current_well] = tracker.centroid_m
                 current_well = temp # change well
                 tracker.dist_neutral = passive_length[current_well] # update passive length
                 tracker.thresh_range = (magnet_thresh[current_well], post_thresh[current_well]) # update tracker threshold to new well
+                tracker.centroid_m = centroid_m[current_well]
                 pass # do nothing, well change happens during read function
             elif command=='POSTMANUALTOGGLE':
                 postManualFlag[current_well] = int(info[0])
@@ -153,13 +154,13 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             elif command=='MOTORINIT':
                 HomingMotorStatus[current_well] = info[0]
                 if HomingMotorStatus[current_well] == "HOME":
-                    ScreenMessage = "HOMING MOTOR."
+                    ScreenMessage[current_well] = "HOMING MOTOR."
                     img.draw_string(25,80, "HOMING MOTOR", scale=4, mono_space=False)
                 elif HomingMotorStatus[current_well] == "FAIL":
-                    ScreenMessage = "FAILED MOTOR HOME."
+                    ScreenMessage[current_well] = "FAILED MOTOR HOME."
                     img.draw_string(25, 80, "FAILED MOTOR HOME", scale=4, mono_space=False)
                 elif HomingMotorStatus[current_well] == "PASS":
-                    ScreenMessage = "MOTOR READY."
+                    ScreenMessage[current_well] = "MOTOR READY."
                 else:
                     pass
                 
@@ -170,56 +171,66 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             else:
                 initFlag[current_well] == False # hold low
         
-        # First, query global stop/start input.  If high, do not do anything
         on = pin7.value()
-
         if uart.simulationMode == True:
             on = False # do not trigger global stop/start input
             if isInit[current_well] == False: # initialize, if uninitialized
                 initFlag[current_well] = True
-         
+        
+        # First, query global stop/start input.  If high, do not do anything
+        
         if on:
             toc = utime.ticks_ms() - t0
             if (toc > tic):
                 frame_rate = 1000.0/(toc-tic)
-            print('Stopped. fps = {}, exp = {}'.format(frame_rate, sensor.get_exposure_us()))
+            print('Stopped. fps = {}'.format(frame_rate))
             continue
             
-        if HELPERFLAG:
-            h_thresh = (helper_magnet_thresh, helper_post_thresh)
-            h_area = (helper_magnet_area, helper_post_area)
-            h_extent = helper_magnet_extent
-            h_ar = helper_magnet_aspectratio
-            h_circ = helper_post_circularity
-            
-            stats_m, stats_p = cb.HelperFunction(img, h_thresh, h_area, h_ar, (ROI_magnet, ROI_post), h_extent, h_circ, HELPERMASK)
-            continue
-
-        if ScreenMessage is not None:
-            img.draw_string(25, 80, ScreenMessage, scale=4, mono_space=False)
+        if ScreenMessage[current_well] is not None:
+            # img.draw_string(25, 80, ScreenMessage[current_well], scale=4, mono_space=False)
+            pass
         
         if postManualFlag[current_well] == True:
-            img.draw_circle(postManual[current_well][0], postManual[current_well][1], color=127, fill=True)
+            img.draw_circle(postManual[current_well][0], postManual[current_well][1], 10, color=127, fill=True)
+        
         if initFlag[current_well]:
+            img.draw_string(25, 100, "CAMERA INITIALIZING", scale=4)
             initFlag[current_well] = False # immediately flip low
+            # RESET PASSIVE DEFLECTIONS, MAX TRACKER
             tracker.passive_deflection = None # reset for initPassive function
             tracker.dist_neutral = None # reset for initPassive function
-            tracker.maxTracker = cb.MaxTracker(200, CircularBufferSize, n_hysteresis)
+            tracker.maxTracker = cb.MaxTracker(200, CircularBufferSize, n_hysteresis) # reset maxTracker
+
+            # get magnet and post
             stats_m = cb.locate_magnet(img, tracker.thresh_range, tracker.area_range, ROI_magnet, extent = 0.7, aspectratio = (0.7, 2.0))
             if postManualFlag[current_well] == False:
                 stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post, circularity=0.5)
             else:
                 stats_p = postManual[current_well]
 
-            if len(stats_m) == 0 or len(stats_p) == 0:
-                # run determine thresholds function to get new thresholds (needs more work to get more appropriate thresholds)
-                tracker.thresh_range, tracker.area_range = cb.determineThresholds(img, tracker.area_range, tracker.roi, tracker.roi_post, tracker.roi_magnet, visualize=False)
-                # get new stats
-                stats_m = cb.locate_magnet(img, tracker.thresh_range, tracker.area_range, ROI_magnet, extent = 0.7, aspectratio = (0.7, 2.0))
-                if postManualFlag[current_well] == False:
-                    stats_p = cb.locate_post(img, tracker.thresh_range, tracker.area_range, ROI_post, circularity=0.5)
-                
-                # print(tracker.thresh_range)
+            if len(stats_m) == 0:
+                new_magnet_thresh, area_range = cb.determineThresholds(img, tracker.area_range[0], tracker.roi, 'magnet')
+                tracker.thresh_range = (new_magnet_thresh, tracker.thresh_range[1])
+                stats_m = cb.locate_magnet(img, tracker.thresh_range, tracker.area_range, ROI_magnet, extent = 0.7, aspectratio = (1,2))
+            
+            area = tracker.area_range[0]
+            extent = 0.7
+            apectratio = 1.5
+            if len(stats_m) > 0:
+                # choose best stats
+                magnet = stats_m[0]
+                area = magnet.area()
+                cent_m = np.array((magnet.cx(), magnet.cy()))
+                extent = magnet.extent()
+                aspectratio = float(magnet.w()) / float(magnet.h())
+                pass
+            else:
+                magnet = None
+                area = tracker.area_range[0][1]
+                cent_m = np.array((0,0))
+                extent = tracker.extent
+                aspectratio = tracker.aspectratio
+            
             
             # put stats through initPassive function to set passive length variables in tracker and in script
             centroid_m_passive[current_well], centroid_p_passive[current_well] = tracker.initPassive(stats_m, stats_p, postManualFlag[current_well], postManual[current_well])
@@ -239,7 +250,9 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             value = tracker.processImage(img, tic, value, cb.PostAndMagnetTracker.computeStretchFrequency, postManualFlag[current_well], postManual[current_well])
             
             #print(value)
+            
             stretch = value[0][-1]
+                
             if stretch < -0.25 or stretch > 0.25:
                 isInit[current_well] = False
                 initFlag[current_well] = True # re-init
@@ -248,10 +261,10 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
 
             # output data to Arduino over Serial
             outstring = "-43#{}#{}#{}#{}#{}#{}".format(tic, current_well, passive_length[current_well], magnet_thresh[current_well], post_thresh[current_well], centroid_p_passive[current_well])
-            print(outstring+",{},{}".format(frame_rate, tracker.maxTracker.update_max)) # print to IDE
+            #print(outstring+",{},{}".format(frame_rate, tracker.maxTracker.update_max)) # print to IDE
             uart.write(outstring+'\n') # send to Arduino
             continue
-
+            
         if isInit[current_well]:
             # Modified processImage function, without plotting.  plotting_paramters might be duplicate of information already stored in tracker (or information that can be stored in tracker)
             value = tracker.processImage(img, tic, value, cb.PostAndMagnetTracker.computeStretchFrequency, postManualFlag[current_well], postManual[current_well])
@@ -292,10 +305,64 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
             outstring =  "-35#{}#{}#{}#{}".format(tic, round(stretch,1), tracker.maxTracker.foundMax, tracker.maxTracker.maxes.signal())
             #outstring =  "-35#{}#{}#{}#{}".format(tic, round(stretch,2), tracker.maxTrackerv2.foundMax, tracker.maxTracker.maxes.signal())
             
-            print(outstring+",{},{},{},{},{},{},{}".format(round(frame_rate,1), tracker.maxTracker.hysteresis, tracker.maxTracker.avg_filter, tracker.maxTracker.update_max, tracker.maxTracker.last_min, tracker.maxTracker.last_max, tracker.maxTracker.v)) # print to IDE
+            #print(outstring+",{},{},{},{},{},{},{}".format(round(frame_rate,1), tracker.maxTracker.hysteresis, tracker.maxTracker.avg_filter, tracker.maxTracker.update_max, tracker.maxTracker.last_min, tracker.maxTracker.last_max, tracker.maxTracker.v)) # print to IDE
             uart.write(outstring+'\n')
             
+            if len(tracker.stats_m) > 0:
+                foundMagnet = True
+                area = tracker.stats_m[0].area()
+                cent_m = tracker.centroid_m
+                extent = tracker.stats_m[0].extent()
+                aspectratio = float(tracker.stats_m[0].w()) / float(tracker.stats_m[0].h())
+                
+                magnet = tracker.stats_m[0]
+                statsBox = [magnet.cx()-int(tracker.sizeStats/2), 
+                            magnet.cy()-int(tracker.sizeStats/2), 
+                            tracker.sizeStats,
+                            tracker.sizeStats]
+                s = img.get_statistics(roi=statsBox)
+                thresh = int(s.median()*tracker.smudgeFactor)
+                
+                tracker.area_range = ((int(float(tracker.stats_m[0].area())*0.8), int(float(tracker.stats_m[0].area())*1.2)), tracker.area_range[1])
+                tracker.extent = extent*0.9
+                tracker.aspectratio = (aspectratio*0.8, aspectratio*1.2)
+                
+                if thresh < tracker.thresh_range[0][1] - 1:
+                    magnet_threshold = (0, tracker.thresh_range[0][1] - 1)
+                elif thresh > tracker.thresh_range[0][1] + 1:
+                    magnet_threshold = (0, tracker.thresh_range[0][1] + 1)
+                else:
+                    magnet_threshold = tracker.thresh_range[0]
+                tracker.thresh_range = (magnet_threshold, tracker.thresh_range[1])
+                
+                mag_roi = ( magnet.cx()-int(tracker.sizeROIy/2), 
+                            magnet.cx()+int(tracker.sizeROIy/2), 
+                            magnet.cy()-int(tracker.sizeROIx/2), 
+                            magnet.cy()+int(tracker.sizeROIx/2))
+                bbox = magnet.rect()
+                tracker.roi_magnet = mag_roi
+                #self.thresh_range = (mag_thresh, self.thresh_range[1])
+                img.draw_rectangle(mag_roi[0],mag_roi[2],mag_roi[1]-mag_roi[0],mag_roi[3]-mag_roi[2],color=255, thickness=2)
+                
+                #stats_m = locate_magnet(img, self.thresh_range, self.area_range, mag_roi, self.aspectratio, self.extent)
+                img.draw_rectangle(bbox[0], bbox[1], bbox[2], bbox[3], color=155, thickness=2)
+                print(""" {}  area = {} ({}) centroid_m = {},{} extent = {:3.2f} ({:3.2f}) aspectratio = {:3.2f} ({:2.1f}, {:2.1f}) thresh = {} ({})   {}""".format(tic, 
+                            area, tracker.area_range[0][1], 
+                            cent_m[0],cent_m[1], 
+                            extent, tracker.extent,
+                            aspectratio, tracker.aspectratio[0],tracker.aspectratio[1],
+                            thresh, tracker.thresh_range[0][1],s))
+                #print("{}".format(frame_rate))
+                #tracker.stats_m = []
             
+            else:
+                foundMagnet = False
+                print("{} area = {} centroid_m = {},{} extent = {} aspectratio = {} thresh = {}".format(tic, tracker.area_range[0][1], cent_m[0],cent_m[1], tracker.extent, tracker.aspectratio, tracker.thresh_range[0][1]))
+                img.draw_string(88,419,'WARNING',[255,255,255], scale=2)
+                
+                
+            #print(tracker.stats_m)
+            #tracker.stats_m = []
             toc = utime.ticks_ms() - t0
             if toc > tic:
                 frame_rate = 1000. / (toc-tic)
@@ -309,7 +376,7 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
         if (toc > tic):
             frame_rate = 1000.0/(toc-tic)
             tracker.setFps(frame_rate)  # Used to compute beat_frequency
-            print("Nothing happened, {}, {}".format(frame_rate, current_well))
+            #print("Nothing happened, {}, {}".format(frame_rate, current_well))
             outstring = '-47#{}'.format(tic)
             uart.write(outstring+'\n')
 
