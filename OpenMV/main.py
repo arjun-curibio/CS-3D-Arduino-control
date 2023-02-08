@@ -77,7 +77,6 @@ def show_stretch_cytostretcher_MV(centroid_magnet=(254, 376),
     centroid_p          = [(0,0),       (0,0),      (0,0),      (0,0)]
     centroid_m_passive  = [(0,0),       (0,0),      (0,0),      (0,0)]
     centroid_p_passive  = [(0,0),       (0,0),      (0,0),      (0,0)]
-    
     post_thresh         = [post_thresh_init,post_thresh_init,post_thresh_init,post_thresh_init]
     magnet_thresh       = [magnet_thresh_init,magnet_thresh_init,magnet_thresh_init,magnet_thresh_init]
     

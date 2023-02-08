@@ -65,15 +65,19 @@ int motorInitState[4]         = {   0,    0,    0,    0}; // INITIALIZE MOTOR PO
 boolean MotorInited[4]        = { LOW,  LOW,  LOW,  LOW}; // WHETHER MOTOR IS INITIALIZED
 boolean CameraInited[4]       = { LOW,  LOW,  LOW,  LOW}; // WHETHER CAMERA IS INITIALIZED
 boolean gotStretchFlag = LOW;
+boolean algorithm_magnet_flag = LOW;
 boolean foundMax = LOW;
 int MotorInitWell = 0;
 
 // CAMERA VARIABLES
 int     CameraUnderWell         = 0; // WHICH WELL THE CAMERA IS UNDER
 boolean MovingCamera            = LOW; // WHETHER OR NOT THE CAMERA IS MOVING
-int     CameraSpeed             = 2000; // SPEED OF CAMERA MOTOR (steps/s)
-int     CameraResetPosition     = -3000; // WALL POSITION FOR CAMERA RESET (steps)
-int     CameraStartingPosiiton  = 1200; // POSITION AWAY FROM WALL (steps)
+int     CameraSpeed             = 1250; // SPEED OF CAMERA MOTOR (steps/s)
+int     CameraAcceleration      = 1250; // ACCELERATION OF CAMERA MOTOR (steps/s^2)
+int     CameraResetPosition     = 13000; // WALL POSITION FOR CAMERA RESET (steps)
+int     CameraResetSpeed        = 750; // SPEED OF CAMERA RESET (steps/s)
+int     CameraResetAcceleration = 500; // ACCELERATION OF CAMERA RESET (steps/s^2)
+int     CameraStartingPosition  = 500; // POSITION AWAY FROM WALL (steps)
 int     CameraPosition          = 0; // CURRENT POSITION OF CAMERA (steps)
 boolean enableStateCamera       = LOW; // CAMERA MOTOR ENABLE/DISABLE FLAG (LOW TO DISABLE)
 boolean ResetCameraFlag         = HIGH; // CAMERA RESET POSITION FLAG
@@ -271,9 +275,9 @@ void CameraReset() {
   ResetCameraFlag = HIGH;
   //  enableStateCamera = HIGH;
   //  digitalWrite(SLPCAMERA, enableStateCamera);
-  stCamera.setAcceleration(2000);
-  stCamera.setMaxSpeed(500);
-  CameraMove(CameraResetPosition);
+  stCamera.setAcceleration(CameraResetAcceleration);
+  stCamera.setMaxSpeed(CameraResetSpeed);
+  CameraMove(stCamera.currentPosition() - CameraResetPosition);
   //  stCamera.setMaxSpeed(100000);
 }
 void StartingPositions(int MOTOR, int action) {
@@ -347,7 +351,7 @@ void setup() {
   // CAMERA STAGE VARIABLE SET-UP
   stCamera.setPinsInverted(HIGH, LOW, LOW);
   stCamera.setMaxSpeed(CameraSpeed);
-  stCamera.setAcceleration(CameraSpeed*4);
+  stCamera.setAcceleration(CameraAcceleration);
   stCamera.setCurrentPosition(0);
   ResetCameraFlag = LOW;
   pinMode(SLPCAMERA, OUTPUT); digitalWrite(SLPCAMERA, enableStateCamera);
@@ -428,7 +432,12 @@ void loop() {
     else if (command.substring(0, 6) == "CSPEED") {
       CameraSpeed = command.substring(7, command.length() - 1).toInt();
       stCamera.setMaxSpeed(CameraSpeed);
-      stCamera.setAcceleration(CameraSpeed * 4);
+      stCamera.setAcceleration(CameraAcceleration);
+    }
+    else if (command.substring(0, 6) == "CACCEL") {
+      CameraAcceleration = command.substring(7, command.length() - 1).toInt();
+      stCamera.setMaxSpeed(CameraSpeed);
+      stCamera.setAcceleration(CameraAcceleration);
     }
     // CAMERA COMMANDS PASS THROUGH TO OPENMV
     else if (command.substring(0, 16) == "POSTMANUALTOGGLE") {
@@ -679,7 +688,7 @@ void loop() {
     else if (command.substring(0, 1) == "B") { // Camera Speed
       CameraSpeed = command.substring(1, command.length() - 1).toInt();
       stCamera.setMaxSpeed(CameraSpeed);
-      stCamera.setAcceleration(CameraSpeed);
+      stCamera.setAcceleration(CameraAcceleration);
 
     }
     else if (command.substring(0, 1) == "V") { // camera reset
@@ -712,6 +721,26 @@ void loop() {
     }
     if (magic == -35) { // <t>#<stretch>#<foundMax>#<max_stretch>\n
       gotStretchFlag = HIGH;
+      algorithm_magnet_flag = HIGH;
+      int index = mv.indexOf('#');
+      t_camera = mv.substring(0, index).toFloat();
+      mv = mv.substring(index + 1);
+
+      index = mv.indexOf('#');
+      stretchValue = mv.substring(0, index).toFloat();
+      mv = mv.substring(index + 1);
+
+      index = mv.indexOf('#');
+      foundMax = mv.substring(0,index).toInt();
+      mv = mv.substring(index + 1);
+
+      index = mv.indexOf('[');
+      int index2 = mv.indexOf(']');
+      maxs = mv.substring(index, index2+1);
+    }
+    if (magic == -36) {  // backup magnet <t>#<stretch>#<foundMax>#<max_stretch>\n
+      gotStretchFlag = HIGH;
+      algorithm_magnet_flag = LOW;
       int index = mv.indexOf('#');
       t_camera = mv.substring(0, index).toFloat();
       mv = mv.substring(index + 1);
@@ -949,14 +978,14 @@ void loop() {
     MovingCamera = LOW;
     if (ResetCameraFlag == HIGH) {
       ResetCameraFlag = LOW;
-      stCamera.setCurrentPosition(-1*CameraStartingPosiiton);
+      stCamera.setCurrentPosition(-1*CameraStartingPosition);
       CameraMove(0);
       CameraUnderWell = 0;
       OMV.print(CameraUnderWell);
       OMV.println("&CHANGE#");
     }
     else if (ResetCameraFlag == LOW) {
-      stCamera.setAcceleration(CameraSpeed*4);
+      stCamera.setAcceleration(CameraAcceleration);
       stCamera.setMaxSpeed(CameraSpeed);
     }
     enableStateCamera = LOW; digitalWrite(ENCAMERA, !enableStateCamera); digitalWrite(SLPCAMERA, enableStateCamera);
@@ -1037,6 +1066,10 @@ void loop() {
       Serial.print(stCamera.currentPosition());
       Serial.print('&');
       Serial.print(CameraUnderWell);
+      Serial.print('&');
+      Serial.print(gotStretchFlag);
+      Serial.print('&');
+      Serial.print(algorithm_magnet_flag);
       
       Serial.println(' ');
       timerSerial = 0;

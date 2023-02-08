@@ -79,10 +79,6 @@ class Centroid: # Class to hide a centroid inside something that acts like a sta
     def get_stats(self):
         return self.stats
 
-def eye():
-    return np.array([[1.0, 0, 0, 0], [0, 1.0, 0, 0], [0, 0, 1.0, 0], [0, 0, 0, 1.0]])
-
-
 def find_first(x):
     # From Stackoverflow "Numpy:find first index of value fast"
     idx = x.view(bool).argmax() // x.itemsize
@@ -108,39 +104,10 @@ class CircularBuffer:
         return self.buffer
     def length(self):
         return len(self.buffer)
-    #def length(self):
-        #if self.count < self.buflen:
-            #return self.head
-        #else:
-            #return self.buflen
-    #def last(self):
-        #return self.buffer[self.head-1]
-    #def maxlen(self):
-        #return self.buflen
-    #def buf_start(self):
-        ## Cumulative index of buf[0]
-        #return max(0, self.count - self.buflen)
-    #def append(self, v):
-        #if self.head == self.buflen:
-            #self.head = 0  # Wrap around
-        #self.buffer[self.head] = v
-        #self.head += 1
-        #self.count += 1
-    #def count(self):
-        #return self.count # Total count
-    #def signal(self) -> np.array:
-        #if self.count > self.buflen:
-            #first_part = self.buffer[self.head+1:]
-            #second_part = self.buffer[:self.head]
-            #return np.concatenate((first_part, second_part), axis=0)
-        #else:
-            #return self.buffer[:self.head]
     def reset(self):
         self.head = 0
         self.count = 0
         self.bufstart = 0
-
-
 class MaxTracker:
     """ Track the index of maximum values in a signal
     """
@@ -299,40 +266,7 @@ class MaxTracker:
         self.last_tmin = 0
         self.hysteresis = 10
         self.count = -1
-
-
-class SignalTracker:
-    # Track time signal
-
-    def __init__(self):
-        self.tracking = []
-
-    def append(self, v):
-        self.tracking.append(v)
-
-    def signal(self):
-        return self.tracking
-
-    def reset(self):
-        self.tracking = []
-
-
-class CircularSignalTracker:
-    # Track time signal within circular buffer
-
-    def __init__(self):
-        self.buflen = 200
-        self.tracking = CircularBuffer(self.buflen)
-
-    def append(self, v):
-        self.tracking.append(v)
-
-    def signal(self) -> np.array:
-        return self.tracking.signal()
-
-    def reset(self):
-        self.tracking.reset()
-
+        
 
 class PostAndMagnetTracker:
 
@@ -763,7 +697,6 @@ def stats_check(stats, tracking_parameters, blob_centroids):
         else:
             return [Centroid(blob_centroids['magnet_centroid'])], False
 
-
 def locate_post(img, thresh_range=None, area_range=None, roi=None, circularity=None, post_manual_flag = True, post_manual = (57,237), post_tracking_parameters=None ):
     # grab parameters from dictionary
     if post_tracking_parameters is not None:
@@ -790,37 +723,8 @@ def locate_post(img, thresh_range=None, area_range=None, roi=None, circularity=N
         thresh_to_use = thresh_range[1]
     stats_p = img.find_blobs( [thresh_to_use], pixels_threshold=area_range[0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]), x_stride=5, y_stride=5)
     got_one = len(stats_p) > 0
-    # print("--- stats_p ---")
-    # print(stats_p)
-    # areas = GetAreas(stats_p)
-    # if len(areas) > 0:
-    #     print("unfiltered post areas from %.0f to %.0f" % (min(areas), max(areas)))
-
-    # # Filter by blobColor (expecting white)
-    # stats_p = FilterByBlobColor(stats_p, bw)
-
-    # Filter results by area
     stats_p = FilterByArea(stats_p, area_range)
-    # if got_one and len(stats_p) == 0:
-    #     print("  post filtered out by area")
-    #     return stats_p
-
-    # areas = GetAreas(stats_p)
-    # if got_one and len(areas) > 0:
-    #     print("  post areas from %.0f to %.0f (n=%d)" % (min(areas), max(areas), len(areas)))
-
-    # Filter by ROI
-    # stats_p = FilterByROI(stats_p, roi_x, roi_y)
-    # if got_one and len(stats_p) == 0:
-    #     print("  post filtered out by ROI ", roi)
-    #     return stats_p
-
-    # Filter by circularity
     stats_p = FilterByCircularity(stats_p, circularity)
-    # if got_one and len(stats_p) == 0:
-    #     print(" post filtered out by circularity")
-    #     return stats_p
-
     # Order by Circularity
     stats_p = OrderByCircularity(stats_p)
 

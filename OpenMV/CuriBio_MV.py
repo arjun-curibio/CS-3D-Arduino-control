@@ -341,8 +341,7 @@ class PostAndMagnetTracker:
         frames_to_plot = 200
         n_hysteresis = 50
         self.maxTracker = MaxTracker(frames_to_plot, CircularBufferSize, n_hysteresis)
-        self.CircularBufferSize = CircularBufferSize
-        self.n_hysteresis = n_hysteresis
+        
         self.thresh_range = thresh_range
         self.area_range = area_range
         self.roi_post = roi_post
@@ -370,6 +369,8 @@ class PostAndMagnetTracker:
         self.passive_deflection = None  # deflection in pixels
         self.dist_neutral = None  # distance in pixels
         self.microns_per_pixel = None
+        self.angle = None
+        self.trans = None  # Rotation transform
         self.post_centroid = None
         self.InitializedPostCentroid = None
         self.twitch_deflection = 0
@@ -377,29 +378,32 @@ class PostAndMagnetTracker:
         # Lazily initialized title and oscilloscope areas
         self.zoom_rect = None
         self.title_rect = None
+        self.oscilloscope_rect = None
+        self.axes_rect = None
+        self.rows = None
+        self.cols = None
 
+        # Lazily initialized title and oscilloscope areas
+        self.zoom_rect_bigger = None
+        self.title_rect_bigger = None
+        self.axes_rect_bigger = None
+        self.rows_bigger = None
+        self.cols_bigger = None
+
+        self.ylim_left  = [10000.0,-10000.0]  # Outside expected range
+        self.ylim_right = [10000.0,-10000.0]  # Outside expected range
+        
         self.last_max_array = []
         self.sizeROIx = 80
-        self.sizeROIy = 150
+        self.sizeROIy = 200
         self.sizeStats = 20
         self.smudgeFactor = 1.25
 
     def setFps(self, fps):
         self.fps = fps
 
-    def reset(self): # reset tracker initialization
-        self.passive_deflection = None
-        self.dist_neutral = None
-        self.maxTracker = MaxTracker(200, self.CircularBufferSize, self.n_hysteresis)
-        self.roi_magnet = (250, 600, 160, 320)
-        self.roi_post = (0, 250, 160, 320)
-        
-
     # This should be private
-    def initPassive(self, stats_m, stats_p, postManualFlag=True, postManual=(57,237), post_tracking_parameters=None):
-        if post_tracking_parameters is not None:
-            postManualFlag  = post_tracking_parameters['manual_flag']
-            postManual      = post_tracking_parameters['post_manual']
+    def initPassive(self, stats_m, stats_p, postManualFlag, postManual):
         if postManualFlag:
             centroid_p = postManual
         elif stats_m == None or stats_p == None:
@@ -532,6 +536,96 @@ class PostAndMagnetTracker:
         # self.axis_limits = (start, start + int(self.millisecs), 0, self.axes_rect[3])
 
         return best_scale
+
+    # def plot(self, img, rect, x, y, color, symbol, linewidth, leftright):  # left=0 right=1
+    #     ymin = min(y)
+    #     ymax = max(y)
+    #     yavg = (ymax - ymin) / 2
+    #     if math.fabs(yavg) == 0.0:  # Avoid divide by zero
+    #         ymin = ymin - 0.5
+    #         ymax = ymax + 0.5
+
+    #     # Update ylim based on new y
+    #     if leftright==0:
+    #         ymin = min(self.ylim_left[0], ymin)
+    #         ymax = max(self.ylim_left[1], ymax)
+    #         self.ylim_left = (ymin, ymax)
+    #     else:  # leftright==1
+    #         ymin = min(self.ylim_right[0], ymin)
+    #         ymax = max(self.ylim_right[1], ymax)
+    #         self.ylim_right = (ymin, ymax)
+
+    #     # Update x range of plot
+    #     self.millisecs = max(self.millisecs, x[-1]-x[0])
+
+    #     # Plot stretch in oscilloscope area
+    #     start = x[0]
+    #     axis_limits = (start, start + self.millisecs, ymin - yavg * 0.1, ymax + yavg * 0.1)
+    #     # tform = makehgtform('axisToRect', (axis_limits, rect))
+    #     if len(x.shape)==1:
+    #         x = np.array(x).reshape((1,len(x)))
+    #         y = np.array(y).reshape((1,len(y)))
+    #     # print("x.shape=",x.shape," y.shape=", y.shape)
+    #     xy = np.concatenate((np.array(x), np.array(y)), axis=0)  # 2-by-n
+    #     # print('xy=', xy)
+    #     # xypts = tform.apply2D(xy)
+    #     # xypts = xypts.T.reshape((xypts.size // 2, 2))  # Needed for polylines
+    #     # print("xypts.shape_new", xypts.shape)
+    #     # xypts = np.array(xypts, dtype=np.int16)
+
+    #     # Show lines '-' or symbol 'o'
+    #     if symbol == '-':
+    #         last_pt = xypts[0]
+    #         for i in range(1, xypts.shape[0]):
+    #             img.draw_line(last_pt[0], last_pt[1],
+    #                           int(xypts[i][0]), int(xypts[i][1]),
+    #                           color, thickness=linewidth)
+    #             last_pt = xypts[i]
+    #     else:
+    #         last_pt = xypts[0]
+    #         for i in range(0, xypts.shape[0]):
+    #             if xy[0,i] >= start:
+    #                 img.draw_line(last_pt[0], last_pt[1],
+    #                               int(xypts[i][0]), int(xypts[i][1]),
+    #                               color, thickness=linewidth)
+    #                 last_pt = xypts[i]
+    #                 img.draw_circle(int(xypts[i][0]), int(xypts[i][1]), 3, color, thickness=1, fill=True)
+
+    #     img.draw_circle(int(xypts[-1][0]), int(xypts[-1][1]), 5, color, fill=True)
+
+    #     # Determine y limit strings (display at least two digits)
+    #     if math.fabs(ymin) < 10 < math.fabs(ymax):
+    #         ylim = ("%.0f" % ymin, "%.0f" % ymax)
+    #     else:
+    #         ylim = ("%0.1f" % ymin, "%0.1f" % ymax)
+
+    #     # # determine size of each label string (aids in placement)
+    #     label_font_size = self.font_scale
+    #     ylim_siz = (EstTextSize(ylim[0], scale=label_font_size), EstTextSize(ylim[1], scale=label_font_size))
+    #     baseline = (0, 0)
+
+    #     # Add labels on the left
+    #     if leftright == 0:
+    #         img.draw_string(rect[0] - ylim_siz[0][0],
+    #                         rect[1] + rect[3] + baseline[0] - ylim_siz[0][1],
+    #                         ylim[0],
+    #                         color=color, scale=label_font_size, mono_space=False)
+    #         img.draw_string(rect[0] - ylim_siz[1][0],
+    #                         rect[1] + baseline[0] - ylim_siz[1][1] // 2,
+    #                         ylim[1],
+    #                         color=color, scale=label_font_size, mono_space=False)
+
+    #     # Add labels on the right
+    #     else:
+    #         # Add frequency axis limits
+    #         img.draw_string(rect[0] + rect[2] + 1,
+    #                         rect[1] + rect[3] - ylim_siz[0][1],
+    #                         ylim[0],
+    #                         color=color, scale=label_font_size, mono_space=False)
+    #         img.draw_string(rect[0] + rect[2] + 1,
+    #                         rect[1] + baseline[0] - ylim_siz[1][1] // 2,
+    #                         ylim[1],
+    #                         color=color, scale=label_font_size, mono_space=False)
 
     def computeStretch(self, tracker):
         stretch_percent = np.array(tracker.signal()) / self.dist_neutral * 100
@@ -906,29 +1000,24 @@ def getBoundingBox(d):
     return d.rect()
 
 
-def determineThresholds(img, area=((1000,3000),(3000,15000)), roi=(250, 600, 160, 320), magnet_or_post='magnet', visualize=False, tracking_parameters=None):
+def determineThresholds(img, area, roi, MagnetOrPost, visualize=False):
     r = range(0, 150)
     data = []
     for t in range(0, 150):
         threshold = (0, t)
         
-        if magnet_or_post == 'magnet':
-            if tracking_parameters is not None:
-                stats = locate_magnet(img, threshold = (0,t), magnet_tracking_parameters=tracking_parameters)
-            else:
-                stats = locate_magnet(   img, (threshold, (0,0)), (area, (0,0)), roi, aspectratio = (1,3), extent=0.6)
-        elif magnet_or_post == 'post':
-            if tracking_parameters is not None:
-                stats = locate_post(img, threshold = (0,t), post_tracking_parameters=tracking_parameters)
-            else:
-                stats = locate_post(     img, ((0,0), threshold), ((0,0), area), roi, circularity = 0.5)
+        if MagnetOrPost == 'magnet':
+            stats = locate_magnet(   img, (threshold, (0,0)), (area, (0,0)), roi, aspectratio = (1,2), extent=0.5)
+        elif MagnetOrPost == 'post':
+            stats = locate_post(     img, ((0,0), threshold), ((0,0), area), roi, circularity = 0.5)
         data.append((t, len(stats)))
         
 
     # Extract data
     idx = [x[0] for x in data]
     nblobs = [x[1] for x in data]
-    
+    # centroid_m = [getCentroid(x[1]) for x in data]
+
     # Determine runs for magnet
     # Choose run with maximum length and then set the threshold in the middle of the run
 
@@ -943,6 +1032,99 @@ def determineThresholds(img, area=((1000,3000),(3000,15000)), roi=(250, 600, 160
         idx = None
     
     return thresh, area
+
+
+# def determineThresholds(img, area_range, roi, roi_post, roi_magnet, visualize=True):
+#     # determine segmentation thresholds via exhaustive search
+#     # returns thresh_range,area_range
+
+#     print("area_range=", area_range)
+#     print("======== determineThresholds =========")
+#     print("visualize = ", visualize)
+#     # Within reasonable range search for magnet and post
+#     r = range(0, 150)
+#     data = []
+#     for i in r:
+#         thresholds = ((0, i), (0, i))
+#         # Get all blobs
+#         if visualize:
+#             print("i = %d" % i, end=': ')
+#         stats_m = locate_magnet(img, thresholds, area_range, roi_magnet, aspectratio = (0.5, 2.0), extent = 0.5)
+#         stats_p = locate_post(img, thresholds, area_range, roi_post, circularity=0.5)
+#         # stats_m, stats_p = locate_magnet_and_post(img, thresholds, area_range, roi)
+#         data.append((i, len(stats_m), len(stats_p)))  # Remember number of blobs detected
+#         if visualize:
+#             VisualizeThresholdSearch(img, i, stats_m, stats_p)
+#         print(stats_p)
+
+#     # Extract data
+#     idx = [x[0] for x in data]
+#     nblobs_m = [x[1] for x in data]  # num blobs for magnet thresh
+#     nblobs_p = [x[2] for x in data]  # num blobs for post thresh
+#     # centroid_m = [getCentroid(x[1]) for x in data]
+
+#     # Determine runs for magnet
+#     # Choose run with maximum length and then set the threshold in the middle of the run
+#     runs_m, runlen_m = nonzero_runs(nblobs_m)
+#     if len(runlen_m) > 0:
+#         runs_m = np.array([runs_m], dtype=np.uint16)
+#         # print("runs_m=",runs_m)
+#         # print("runs_m.shape=",runs_m.shape)
+#         # print("runlen_m=", runlen_m)
+#         runmax_m = np.argmax(np.array([runlen_m]))
+#         # print("runmax_m=",runmax_m)
+#         idx_m = runs_m[0][runmax_m]
+#         # print("idx_m=",idx_m)
+#         # print("runlen_m[0]=",runlen_m[0])
+#         thresh_m = [0, int(r[idx_m] + runlen_m[runmax_m] // 2)]
+#         # print("thresh_m=", thresh_m)
+#     else:
+#         thresh_m = None
+#         idx_m = None
+
+#     # Determine runs for post
+#     # Choose run with maximum length and then set the threshold in the middle of the run
+#     runs_p, runlen_p = nonzero_runs(nblobs_p)
+#     if len(runlen_p) > 0:
+#         runs_p = np.array([runs_p], dtype=np.uint16)
+#         # print("runs_p=",runs_p)
+#         # print("runs_p.shape=",runs_p.shape)
+#         runmax_p = np.argmax(np.array([runlen_p]))
+#         # print("runmax_p=",runmax_p)
+#         idx_p = runs_p[0][runmax_p]
+#         thresh_p = (0, int(r[idx_p] + runlen_p[runmax_p] // 2))
+#     else:
+#         thresh_p = None
+#         idx_p = None
+
+#     if visualize:
+#         print("=========== Summary threshold stats ===========")
+#         print("thresh_m=", thresh_m)
+#         print("thresh_p=", thresh_p)
+#         print("nblobs_m=", nonzero(nblobs_m) )
+#         print("nblobs_p=", nonzero(nblobs_p) )
+#         print("===============================================")
+#     else:
+#         print("thresh=", thresh_m, thresh_p)
+
+#         #
+#         # Show plot of num blobs as a function of threshold
+#         # fig, ax = mp.subplots(2, 1)
+#         # ax[0].plot(idx, nblobs_m)
+#         # # ax[0].plot(area[:,0],area[:,1])
+#         # if thresh_m is not None:
+#         #     ax[0].plot(thresh_m[1], nblobs_m[idx_m], 'o')  # Chosen thresh
+#         # ax[0].set_ylabel('# magnet-like blobs')
+#         # ax[1].plot(idx, nblobs_p)
+#         # # ax[1].plot(area[:,0],area[:,2])
+#         # if thresh_p is not None:
+#         #     ax[1].plot(thresh_p[1], nblobs_p[idx_p], 'o')  # Chosen thresh
+#         # ax[1].set_ylabel('# post-like blobs')
+#         # mp.show()
+#         # end of show plot
+
+#     return (thresh_m, thresh_p), area_range
+
 
 def FilterByArea(stats, area_range):
     good = []
@@ -1079,28 +1261,42 @@ def VisualizeThresholdSearch(img, thresh, stats_m, stats_p):
         bw.draw_string(20, 20, "%d" % thresh, scale=3, color=100, mono_space=False)  # Show the threshold
         
 
-def locate_magnet(img, thresh_range=None, area_range=None, roi=None, aspectratio = None,  extent = None, magnet_tracking_parameters = None):
-    # grab parameters from dictionary
-    if magnet_tracking_parameters is not None:
-        # only grab paramters if they're not function inputs
-        if thresh_range is None:
-            thresh_range    = magnet_tracking_parameters['threshold']
-        if area_range is None:
-            area_range      = magnet_tracking_parameters['area']
-        if extent is None:
-            extent          = magnet_tracking_parameters['extent']
-        if aspectratio is None:
-            aspectratio     = magnet_tracking_parameters['aspectratio']
-        if roi is None:
-            roi             = magnet_tracking_parameters['roi']
+def locate_magnet(img, thresh_range, area_range, roi=(0,0,sensor.width(), sensor.height()), aspectratio = (0.5,10), extent = 0.6):
+    height = sensor.height()
+    width = sensor.width()
+
+    # test = np.array([1, 2, 3]) * width
+    # print(test)
+    # Region of interest in normalized image coordinates(vertical center strip)
+    # roi_x = np.array([0.45,.57]) * (width - 1) + 1
+    # roi_y = np.array([0,1]) * (height - 1) + 1
+    # roi_x = np.array([0.25, .75]) * (width - 1) + 1
+    # roi_y = np.array([0, 1]) * (height - 1) + 1
+    #print(roi)
+    roi_x = (roi[0], roi[1])
+    roi_y = (roi[2], roi[3])
+
+    #
+    # magnet detector (assume sensor is already grayscale)
+    #
+    # print("thresh_range=", thresh_range)
+    #print(roi)
+    stats_m = img.find_blobs( [thresh_range[0]], pixels_threshold=area_range[0][0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]))
     
-    stats_m = img.find_blobs( [thresh_range[0]], pixels_threshold=area_range[0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]))
-    
+    #print(stats_m)
+    # areas = GetAreas(stats_m)
+    # if len(areas) > 0:
+    #     print("unfiltered magnet areas from %.0f to %.0f" % (min(areas), max(areas)))
+
     # Filter results by area
-    stats_m = FilterByArea(stats_m, area_range)
+    stats_m = FilterByArea(stats_m, area_range[0])
     #[print("{},{},{}".format(i.extent(), getAspectRatio(i), i.pixels())) for i in stats_m]
     
     #print("\n")
+    # areas = GetAreas(stats_m)
+    # if len(areas) > 0:
+    #     print("  filtered magnet areas from %.0f to %.0f (n=%d)" % (min(areas), max(areas), len(areas)))
+
     # Filter by ROI
     # stats_m = FilterByROI(stats_m, roi_x, roi_y)
 
@@ -1108,38 +1304,35 @@ def locate_magnet(img, thresh_range=None, area_range=None, roi=None, aspectratio
     stats_m = FilterByAspectRatio(stats_m, aspectratio)
 
     # Filter by extent (filter those below 0.6)
-    stats_m = FilterByExtent(stats_m, extent)
+    #stats_m = FilterByExtent(stats_m, extent)
 
     # Order by Extent
     stats_m = OrderByExtent(stats_m)
 
     return stats_m
 
-def locate_post(img, thresh_range=None, area_range=None, roi=None, circularity=None, post_manual_flag = True, post_manual = (57,237), post_tracking_parameters=None ):
-    # grab parameters from dictionary
-    if post_tracking_parameters is not None:
-        # only grab paramters if they're not function inputs
-        if thresh_range is None:
-            thresh_range    = post_tracking_parameters['threshold']
-        if area_range is None:
-            area_range      = post_tracking_parameters['area']
-        if circularity is None:
-            circularity     = post_tracking_parameters['circularity']
-        if roi is None:
-            roi             = post_tracking_parameters['roi']
-        
-        # always grab these from dictionary
-        post_manual_flag= post_tracking_parameters['manual_flag']
-        post_manual     = post_tracking_parameters['post_manual']
-    
-    if post_manual_flag == True:
-        return Centroid(post_manual)
-    
+def locate_post(img, thresh_range, area_range, roi, circularity=0.5):
+    height = sensor.height()
+    width = sensor.width()
+
+    # test = np.array([1, 2, 3]) * width
+    # print(test)
+    # Region of interest in normalized image coordinates(vertical center strip)
+    # roi_x = np.array([0.45,.57]) * (width - 1) + 1
+    # roi_y = np.array([0,1]) * (height - 1) + 1
+    # roi_x = np.array([0.25, .75]) * (width - 1) + 1
+    # roi_y = np.array([0, 1]) * (height - 1) + 1
+    roi_x = (roi[0], roi[1])
+    roi_y = (roi[2], roi[3])
+
+    #
+    # post detector
+    #
     if thresh_range[1] == None:
         thresh_to_use = (0,15)
     else:
         thresh_to_use = thresh_range[1]
-    stats_p = img.find_blobs( [thresh_to_use], pixels_threshold=area_range[0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]), x_stride=5, y_stride=5)
+    stats_p = img.find_blobs( [thresh_to_use], pixels_threshold=area_range[1][0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]), x_stride=5, y_stride=5)
     got_one = len(stats_p) > 0
     # print("--- stats_p ---")
     # print(stats_p)
@@ -1151,7 +1344,7 @@ def locate_post(img, thresh_range=None, area_range=None, roi=None, circularity=N
     # stats_p = FilterByBlobColor(stats_p, bw)
 
     # Filter results by area
-    stats_p = FilterByArea(stats_p, area_range)
+    stats_p = FilterByArea(stats_p, area_range[1])
     # if got_one and len(stats_p) == 0:
     #     print("  post filtered out by area")
     #     return stats_p

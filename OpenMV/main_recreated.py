@@ -1,5 +1,5 @@
 import sensor, image, time, math, mjpeg, omv, utime
-from CuriBio_MV_dict import *
+from CuriBio_MV import *
 from pyb import Pin, LED, UART
 from ulab import numpy as np
 
@@ -7,10 +7,9 @@ from ulab import numpy as np
 sensor.reset()
 sensor.set_pixformat(sensor.GRAYSCALE)
 sensor.set_framesize(sensor.VGA)
-sensor.skip_frames(time = 1000)
 sensor.set_auto_gain(False)
 sensor.set_auto_whitebal(False)
-
+sensor.skip_frames(time = 1000)
 
 extra_fb = sensor.alloc_extra_fb(sensor.width(), sensor.height(), sensor.GRAYSCALE)
 extra_fb.replace(sensor.snapshot())
@@ -20,6 +19,7 @@ pin7 = Pin('P7', Pin.IN, Pin.PULL_UP)
 uart = Serial(3, 115200, timeout=0)
 clock = time.clock()
 
+uart.simulationMode = False
 
 # INITIAL VALUES
 ROI_post = (0, 250, 160, 320)
@@ -104,7 +104,7 @@ camera_inits        = camera_initialized[well]
 
 tracker = PostAndMagnetTracker(
     (magnet_parameters['threshold'], (0, 10)),       # thresholds
-    (magnet_parameters,              (3000, 10000)), # area
+    (magnet_parameters['area'],      (3000, 10000)), # area
     ROI_post, ROI_magnet,                                               # ROI
     CircularBufferSize=CircularBufferSize)
 
@@ -113,12 +113,12 @@ while True:
     clock.tick()
     tracker.tic = utime.ticks_ms()-t0
     img = sensor.snapshot()
-
     if uart.simulationMode == False:
         temp, command, info = uart.read()
+        print(command)
         if command=='INIT': # INITIALIZE TRACKER
             well = temp
-            camera_inits['begin initialization'] = True
+            camera_inits['begin_initialization'] = True
         
         elif command == 'CHANGE': # CHANGE WELL
             # Store current variables into dictionaries
@@ -165,9 +165,9 @@ while True:
             camera_inits["begin_initialization"] = True
     
     if stop:
-        toc = utime.ticks_ms()-t0
-        if (toc > tracker.tic):
-            frame_rate = 1000.0/(toc-tracker.tic)
+        toc = utime.ticks_ms() - t0
+        if toc > tracker.tic:
+            frame_rate = 1000. / (toc-tracker.tic)
     
     if post_parameters['manual_flag']:
         img.draw_circle(centroids['post_centroid'][0], centroids['post_centroid'][1],
@@ -175,7 +175,9 @@ while True:
     
     # INITIALIZE CAMERA
     if camera_inits["begin_initialization"]:
-        img.draw_string(25,80, "CAMERA INITIALIZING", scale=4)
+        
+        img.draw_string(25,80, "CAMERA INITIALIZING", [255,0,0], 4, 1, 1, True, 0)
+        utime.sleep_us(1)
         camera_inits["begin_initialization"] = False # FLIP LOW
 
         tracker.reset() # reset tracker
@@ -191,7 +193,7 @@ while True:
             aspectratio = (1,3)
             k = 0
             for i in range(3):
-                thresh, area = determineThresholds(img, magnet_or_post='magnet', extent = extent, aspectratio = aspectratio, tracking_parameters=magnet_parameters)
+                thresh, area = determineThresholds(img, magnet_or_post='magnet', tracking_parameters=magnet_parameters)
                 if thresh == None:
                     # widen search parameters, try again
                     extent = extent - 0.1
@@ -213,12 +215,17 @@ while True:
                 # DID NOT FIND MAGNET
                 print("FAILED INITIALIZATION")
                 camera_inits['is_initialized'] = False
+                
         
         # ASSUMPTION IS THAT stats_m IS VALID
+        area = stats_m[0].area()
+        extent = stats_m[0].extent()
+        aspectratio = float(stats_m[0].w()) / float(stats_m[0].h())
+        
         magnet_parameters = store_variables(magnet_parameters,
-            area=stats_m[0].area(),
-            extent=stats_m[0].extent(),
-            aspectratio=float(stats_m[0].w()) / float(stats_m[0].h())
+            area=(int(area*0.8), int(area*1.2)),
+            extent=extent,
+            aspectratio=(aspectratio * 0.8, aspectratio*1.2)
             )
         
         centroids = store_variables(centroids,
@@ -240,8 +247,8 @@ while True:
         stats_m, foundMagnetFlag = stats_check(stats_m, magnet_parameters, centroids)
         stats_p, foundPostFlag = stats_check(stats_p, post_parameters, centroids)
         
-        centroid_m = np.array(stats_m[0].cx(), stats_m[0].cy())
-        centroid_p = np.array(stats_p[0].cx(), stats_p[0].cy())
+        centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
+        centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
         
 
         value = tracker.processImage(img, PostAndMagnetTracker.computeStretchFrequency, centroid_m, centroid_p)
@@ -253,7 +260,7 @@ while True:
         else:
             camera_inits['is_initialized'] = True
 
-        
+        backup_magnet_parameters = magnet_parameters.copy()
         uart.send_over_serial(-43, 
             [   well, 
                 tissue_param['passive_length'], 
@@ -268,12 +275,29 @@ while True:
     if camera_inits['is_initialized']: # process, since it's already initialized
         stats_m = locate_magnet(img, magnet_tracking_parameters=magnet_parameters)
         stats_p = locate_post(img, post_tracking_parameters=post_parameters)
-        
+        #print(stats_m)
         stats_m, foundMagnetFlag = stats_check(stats_m, magnet_parameters, centroids)
         stats_p, foundPostFlag = stats_check(stats_p, post_parameters, centroids)
         
-        centroid_m = np.array(stats_m[0].cx(), stats_m[0].cy())
-        centroid_p = np.array(stats_p[0].cx(), stats_p[0].cy())
+        found_backup_magnet_flag = False
+        if foundMagnetFlag==False:
+            #print('in backup')
+            backup_magnet_parameters['roi'] = (285, 285+356, 81, 81+309)
+            backup_magnet_parameters['extent'] = 0.6
+            backup_magnet_parameters['aspectratio'] = (0.8, 2)
+            backup_magnet_parameters['area'] = (1500, 4000)
+            stats_m_backup = locate_magnet(img, magnet_tracking_parameters=backup_magnet_parameters)
+            stats_m_backup, found_backup_magnet_flag = stats_check(stats_m_backup, backup_magnet_parameters, centroids)
+            if found_backup_magnet_flag:
+                #print('found a backup')
+                #print(stats_m_backup)
+                stats_m = stats_m_backup
+                foundMagnetFlag = True
+            
+        #print(stats_m)
+        centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
+        centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
+        
         
         value = tracker.processImage(img, PostAndMagnetTracker.computeStretchFrequency, centroid_m, centroid_p)
 
@@ -290,14 +314,14 @@ while True:
             stretch = 0
             max_stretch = []
         
-        
+        #foundMagnetFlag = True
         if foundMagnetFlag:
             # update based on new magnet
             # get area, centroid, extent, aspectratio
 
             c_area, c_extent, c_aspectratio, c_threshold, c_roi = extract_variables(magnet_parameters, 
                 ('area','extent','aspectratio','threshold','roi'))
-
+                
             area        = stats_m[0].area()
             centroid_m  = stats_m[0].cx(), stats_m[0].cy()
             extent      = stats_m[0].extent()
@@ -330,31 +354,41 @@ while True:
             
             # new threshold as median + 3*std
             # attempting to avoid pixel value outliers that may be present in the center of the magnet
-            calculated_thresh = int(centroid_area.median() + 3*centroid_area.stdev())
+            calculated_thresh = int(centroid_area.max()*1.3)
             if      calculated_thresh > c_threshold[1] + 1: threshold = c_threshold[1] + 1
             elif    calculated_thresh < c_threshold[1] - 1: threshold = c_threshold[1] - 1
             else:                                           threshold = c_threshold[1]
             
+            #print(centroid_area)
             # store all newly calculated parameters
             magnet_parameters = store_variables(magnet_parameters, 
-                area=(area*0.8, area*1.2),
+                #area=(int(area*0.8), int(area*1.2)),
                 extent=extent*0.9,
-                aspectratio=(aspectratio*0.9, aspectratio*1.2),
-                threshold=int(centroid_area.median() + 3*centroid_area.stdev()),
+                aspectratio=(aspectratio*0.8, aspectratio*1.2),
+                #threshold=(0,int(centroid_area.median() + 3*centroid_area.stdev())),
+                threshold=(0,threshold),
                 roi=mag_roi)
 
+            if found_backup_magnet_flag:
+                #print("{:17} ({}) ".format('Found backup: ', round(frame_rate,2)), end='')
+                pass
+            else:
+                #print("{:17} ({}) ".format('Found magnet: ', round(frame_rate,2)), end='')
+                pass
             
-            print("{:15}".format('Found magnet: '), end='')
-            print(magnet_parameters)
+            #[print("{}: {}".format(key, value), end='') for key, value in magnet_parameters.items()]
+            #print('')
         else:
-            print("{:15}".format('No magnet: '), end='')
-            print(magnet_parameters)
-
-        toc = utime.ticks_ms() - tracker.tic
-        if toc > 0:
-            frame_rate = 1000./ toc
+            #print("{:17} ({}) ".format('No magnet: ', round(frame_rate,2)), end='')
+            #[print("{}: {}, ".format(key, value), end='') for key, value in magnet_parameters.items()]
+            #print('')
+            pass
+        
+        toc = utime.ticks_ms() - t0
+        if toc > tracker.tic:
+            frame_rate = 1000. / (toc-tracker.tic)
             tracker.setFps(frame_rate)
-
+        
         uart.send_over_serial(-35, 
             [   round(stretch, 1),
                 tracker.maxTracker.foundMax,
@@ -364,11 +398,13 @@ while True:
         tracker.maxTracker.foundMax = 0
         continue
 
-    toc = utime.ticks_ms() - tracker.tic
-    if toc > 0:
-        frame_rate = 1000. / toc
+    toc = utime.ticks_ms() - t0
+    if toc > tracker.tic:
+        frame_rate = 1000. / (toc-tracker.tic)
         tracker.setFps(frame_rate)
+        print("{}, ".format(frame_rate), end='')
         uart.send_over_serial(-47, [tracker.tic], print_flag = True)
+        
 
             
                     

@@ -159,28 +159,7 @@ class CS3D_GUI:
                     
                 else:
                     self.messageScreen('Error occured. Cannot start stretch for Row {}.'.format(self.wellLabels[motor]))
-            def changeStretch(motor=i):
-                x = self.desiredStretchMotor[motor].get()
-                self.desiredStretchMotor[motor].set(floor(x))
-                self.stretchEntry[motor].update()
-                if x > 25:
-                    self.messageScreen('Stretching to more than 25% is disabled.')
-                    self.desiredStretchMotor[motor].set(floor(self.setTissueStretch[motor]))
-                    self.stretchEntry[motor].update()
-                elif x > 15:
-                    self.messageScreen('Setting stretch to {}% may not be possible. Check if the tissue reaches {}%, and adjust if necessary.'.format(x,x))
-                    self.setTissueStretch[motor] = self.desiredStretchMotor[motor].get()
-                
-                elif x < 0:
-                    self.messageScreen('Cannot set to negative stretch.')
-                    self.desiredStretchMotor[motor].set(floor(self.setTissueStretch[motor]))
-                    self.stretchEntry[motor].update()
-                else:
-                    self.messageScreen('Updated stretch for Row {}: {}'.format(self.wellLabels[motor], x))    
-                    self.setTissueStretch[motor] = self.desiredStretchMotor[motor].get()
-                
-                print(self.setTissueStretch)
-                pass
+            
             def openWaveformDialog(motor=i):
                 self.waveformroot.deiconify()
                 self.wfmotor = motor
