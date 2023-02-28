@@ -683,7 +683,7 @@ void loop() {
       // Serial.println('#');
 
       CameraMove(CameraPosition);
-      CameraMove(CameraPosition);
+      // CameraMove(CameraPosition);
     }
     else if (command.substring(0, 1) == "B") { // Camera Speed
       CameraSpeed = command.substring(1, command.length() - 1).toInt();
@@ -978,6 +978,8 @@ void loop() {
     MovingCamera = LOW;
     if (ResetCameraFlag == HIGH) {
       ResetCameraFlag = LOW;
+      stCamera.setAcceleration(CameraAcceleration);
+      stCamera.setMaxSpeed(CameraSpeed);
       stCamera.setCurrentPosition(-1*CameraStartingPosition);
       CameraMove(0);
       CameraUnderWell = 0;

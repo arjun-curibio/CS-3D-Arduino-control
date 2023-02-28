@@ -43,7 +43,7 @@ class Motor:
 class CS3D:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.geometry("800x525")
+        self.root.geometry("500x525")
         self.root.configure({"background":'white'})
         self.root.resizable(0,0)
         self.root.protocol("WM_DELETE_WINDOW", self.destroy)
@@ -543,16 +543,16 @@ class CS3D:
                     homing_stage=int(home_stage))
                 
             if (time() - self.t_display) > 0.050:
-                # self.motors[self.well_motor].display()
+                self.motors[self.well_motor].display()
                 self.t_display = time()
-                print("t={}, well={}, homed={}, handshake={}, stretch={}, foundmax={}, maxes={}".format(
-                    self.tracking_t, 
-                    self.tracking_well, 
-                    self.tracking_motor_homed, 
-                    self.tracking_recieved_motor_init_handshake, 
-                    self.tracking_stretch, 
-                    self.tracking_found_max, 
-                    self.tracking_maxes))
+                # print("t={}, well={}, homed={}, handshake={}, stretch={}, foundmax={}, maxes={}".format(
+                #     self.tracking_t, 
+                #     self.tracking_well, 
+                #     self.tracking_motor_homed, 
+                #     self.tracking_recieved_motor_init_handshake, 
+                #     self.tracking_stretch, 
+                #     self.tracking_found_max, 
+                #     self.tracking_maxes))
 
                 # print('ID {}: enabled={}, '.format(ID, enabled), end='')
             # print('')
@@ -649,7 +649,7 @@ class CS3D:
             # blit stuff
             self.screen.blit(image, (0, 0))
             self.screen.blit(self.bottom_screen_font.render("C{},{}".format(self.camera_well, self.camera_position),1 , (255, 0, 0)), (20, 450))
-
+            self.screen.blit(self.bottom_screen_font.render("D{},{}".format(self.well_motor, self.motors[self.well_motor].d), 1, (0,255,0)), (20,460))
             # self.screen.blit(self.font.render("FPS %.2f"%(fps), 1, (255, 0, 0)), (0, 0))            
             return image
         else:

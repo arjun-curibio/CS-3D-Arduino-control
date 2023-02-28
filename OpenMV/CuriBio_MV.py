@@ -24,7 +24,7 @@ class Serial:
         current_well, command, info = 0, '', []
         #print('reading')
         val = self.uart.read()
-        print(val)
+        #print(val)
         if val is not None:
             if len(val) > 4 and len(val) < 200:
                 #print(len(val))
@@ -550,14 +550,44 @@ def getCentroid(d):
 def getAspectRatio(d):
     return float(d.w()) / float(d.h())
 
-def determineThresholds(img, area=((1000,3000),(3000,15000)), roi=(250, 600, 160, 320), magnet_or_post='magnet', visualize=False, tracking_parameters=None):
-    r = range(0, 150)
+
+def get_parameters_from_stats(stats_m):
+    area        = stats_m.area()
+    centroid_m  = stats_m.cx(), stats_m.cy()
+    extent      = round(stats_m.extent(),2)
+    aspectratio = round(float(stats_m.w()) / float(stats_m.h()),2)
+
+    return area, extent, aspectratio, centroid_m
+
+def calculate_threshold(centroid_area, smudgeFactor, current_threshold):
+    calculated_thresh = int(centroid_area.max()*smudgeFactor)
+
+    if calculated_thresh > current_threshold[1] + 1:
+        threshold = current_threshold[1] + 1
+        direction = 1
+    elif    calculated_thresh < current_threshold[1] - 1:
+        threshold = current_threshold[1] - 1
+        direction = -1
+    else:
+        threshold = current_threshold[1]
+        direction = 0
+
+    return threshold, direction
+
+def determineThresholds(area=((1000,5000),(3000,15000)), roi=(250, 600, 160, 320), magnet_or_post='magnet', visualize=False, tracking_parameters=None):
+    r = range(0, 100)
     data = []
     for t in r:
+        img = sensor.snapshot()
+
         threshold = (0, t)
+        img.binary([(0,threshold)], True, True)
+
         if magnet_or_post == 'magnet':
             if tracking_parameters is not None:
                 stats = locate_magnet(  img, (0,t), magnet_tracking_parameters=tracking_parameters)
+                if visualize==True:
+                    visualizeDetermineThresholds(img, threshold, stats, tracking_parameters)
             else:
                 stats = locate_magnet(  img, (threshold, (0,0)), (area, (0,0)), roi, aspectratio = (1,3), extent=0.6)
         elif magnet_or_post == 'post':
@@ -566,6 +596,8 @@ def determineThresholds(img, area=((1000,3000),(3000,15000)), roi=(250, 600, 160
             else:
                 stats = locate_post(    img, ((0,0), threshold), ((0,0), area), roi, circularity = 0.5)
         data.append((t, len(stats)))
+
+
 
 
     # Extract data
@@ -586,6 +618,20 @@ def determineThresholds(img, area=((1000,3000),(3000,15000)), roi=(250, 600, 160
         idx = None
 
     return thresh, area
+
+def visualizeDetermineThresholds(img, threshold, stats, parameters):
+
+    img.binary([threshold]).to_rgb565()
+    for stat in stats:
+        img.draw_circle(stat.cx(), stat.cy(), 4,[0,0,155], 1, True)
+
+    roi = parameters['roi']
+    img.draw_rectangle( roi[0],
+                        roi[2],
+                        roi[1]-roi[0],
+                        roi[3]-roi[2],
+                    color=[155,0,0], thickness=2)
+
 
 def FilterByArea(stats, area_range):
     good = []
@@ -662,10 +708,18 @@ def locate_magnet(img, thresh_range=None, area_range=None, roi=None, aspectratio
         if roi is None:
             roi             = magnet_tracking_parameters['roi']
 
-    print(thresh_range)
-    print(area_range)
+    #print("{}, {}, {}, {}, {}".format(thresh_range, area_range, extent, aspectratio, roi))
+    #print(thresh_range)
+    #print(area_range)
     stats_m = img.find_blobs( [thresh_range], pixels_threshold=area_range[0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]))
 
+    if len(stats_m) > 0:
+        k=0
+        for stats in stats_m:
+            #print(stats)
+            #print("{}: {}".format(k, get_parameters(img,[stats], 20, 80, 150)))
+            k+=1
+    #print('')
     # Filter results by area
     stats_m = FilterByArea(stats_m, area_range)
     #[print("{},{},{}".format(i.extent(), getAspectRatio(i), i.pixels())) for i in stats_m]
@@ -684,6 +738,25 @@ def locate_magnet(img, thresh_range=None, area_range=None, roi=None, aspectratio
     stats_m = OrderByExtent(stats_m)
 
     return stats_m
+
+def get_parameters(img,stats_m, sizeStats, sizeROIx, sizeROIy):
+    area        = stats_m[0].area()
+    centroid_m  = stats_m[0].cx(), stats_m[0].cy()
+    extent      = round(stats_m[0].extent(),2)
+    aspectratio = round(float(stats_m[0].w()) / float(stats_m[0].h()),2)
+    centroid_box = [ centroid_m[0] - int(sizeStats/2),
+                    centroid_m[1] - int(sizeStats/2),
+                    sizeStats,
+                    sizeStats]
+    centroid_area = img.get_statistics(roi=centroid_box)
+
+    mag_roi = ( stats_m[0].cx()-int(sizeROIy/2),
+                stats_m[0].cx()+int(sizeROIy/2),
+                stats_m[0].cy()-int(sizeROIx/2),
+                stats_m[0].cy()+int(sizeROIx/2))
+
+    return centroid_area, area, centroid_m, extent, aspectratio, mag_roi
+
 
 def stats_check(stats, tracking_parameters, blob_centroids):
     if 'manual_flag' in tracking_parameters:
