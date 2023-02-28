@@ -620,9 +620,41 @@ def determineThresholds(area=((1000,5000),(3000,15000)), roi=(250, 600, 100, 320
 
     return thresh, area
 
+
+def determineThresholdDuringTracking(img, threshold=None, extent=None, aspectratio=None, area=None, roi=None, tracking_parameters=None):
+    if threshold==None:
+        threshold   =   tracking_parameters['threshold']
+    if area is None:
+        area        =   tracking_parameters['area']
+    if extent is None:
+        extent      =   tracking_parameters['extent']
+    if aspectratio is None:
+        aspectratio =   tracking_parameters['aspectratio']
+    if roi is None:
+        roi         =   tracking_parameters['roi']
+    
+    t = threshold[1]
+    extent_to_use = extent-0.2
+    aspectratio_to_use = (aspectratio[0]-0.2, aspectratio[1]+0.2)
+    area_to_use = (int(area[0]*0.75), int(area[1]*1.5))
+    roi_to_use = [roi[0]-50, roi[1]+50, roi[2]-50, roi[3]+50]
+    r = []
+    img = sensor.snapshot()
+    for i in range(5):
+        r = r + [t+i, t-i]
+    
+    for t in r:
+        
+        thresh = (0, t)
+        
+        stats = locate_magnet(  img, thresh, area_to_use, roi_to_use, aspectratio = aspectratio_to_use, extent=extent_to_use)
+        if len(stats) > 0: # found a magnet
+            return thresh, stats, area_to_use, extent_to_use, aspectratio_to_use, roi_to_use
+        
+    return threshold, [], area, extent, aspectratio, roi
+    
 def visualizeDetermineThresholds(img, stats):
 
-    img.to_rgb565()
     for stat in stats:
         img.draw_circle(stat.cx(), stat.cy(), 4,[0,0,155], 1, True)
     
