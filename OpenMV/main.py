@@ -375,19 +375,11 @@ while True:
         found_backup_magnet_flag = False
         #utime.sleep_ms(500)
         if foundMagnetFlag==False:
-            #print('in backup')
-            backup_magnet_parameters['roi'] = ROI_magnet[well]
-            backup_magnet_parameters['extent'] = 0.6
-            backup_magnet_parameters['aspectratio'] = (0.2, 5)
-            backup_magnet_parameters['area'] = (1500, 4000)
-            #print('BACKUP')
-            stats_m_backup = locate_magnet(img, magnet_tracking_parameters=backup_magnet_parameters)
-            stats_m_backup, found_backup_magnet_flag = stats_check(stats_m_backup, backup_magnet_parameters, centroids)
-            if found_backup_magnet_flag:
-                #print('found a backup')
-                #print(stats_m_backup)
-                stats_m = stats_m_backup
+            threshold, stats_m, area, extent, aspectratio, roi = determineThresholdDuringTracking(img, tracking_parameters=magnet_parameters)
+            if len(stats_m) > 0:
                 foundMagnetFlag = True
+                found_backup_magnet_flag = True
+            
 
         if went_through_param_algorithm:
             if draw_outlines == True:
@@ -395,12 +387,12 @@ while True:
                                     mag_roi[2],
                                     mag_roi[1]-mag_roi[0],
                                     mag_roi[3]-mag_roi[2],
-                    color=[155,0,0], thickness=2)
+                    color=155, thickness=2)
                 img.draw_rectangle( magnet_outline[0],
                                     magnet_outline[1],
                                     magnet_outline[2],
                                     magnet_outline[3],
-                    color=[0,155,0], thickness=2)
+                    color=255, thickness=2)
 
         #print(stats_m)
         centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
