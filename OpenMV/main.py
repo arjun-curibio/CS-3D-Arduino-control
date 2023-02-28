@@ -45,10 +45,10 @@ blob_centroids = [  {"magnet_centroid":(0,0), "post_centroid": (53,237), "passiv
                     {"magnet_centroid":(0,0), "post_centroid": (53,237), "passive_magnet_centroid": (0,0), "passive_post_centroid": (53,237)},
                     {"magnet_centroid":(0,0), "post_centroid": (53,237), "passive_magnet_centroid": (0,0), "passive_post_centroid": (53,237)}]
 
-magnet_tracking_parameters = [  {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,55), 'roi':ROI_magnet[0]},
-                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,40), 'roi':ROI_magnet[1]},
-                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,40), 'roi':ROI_magnet[2]},
-                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,40), 'roi':ROI_magnet[3]}]
+magnet_tracking_parameters = [  {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,55), 'roi':ROI_magnet[0], 'smudgeFactor':1.1},
+                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,40), 'roi':ROI_magnet[1], 'smudgeFactor':1.1},
+                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,40), 'roi':ROI_magnet[2], 'smudgeFactor':1.1},
+                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,40), 'roi':ROI_magnet[3], 'smudgeFactor':1.1}]
 
 post_tracking_parameters = [    {'area':(3000,15000),'circularity':0.6,'threshold':(0,10), 'roi':ROI_post, 'manual_flag':True, 'post_manual':(53,237)},
                                 {'area':(3000,15000),'circularity':0.6,'threshold':(0,10), 'roi':ROI_post, 'manual_flag':True, 'post_manual':(53,237)},
@@ -132,6 +132,7 @@ while True:
             well = temp
             camera_inits['begin_initialization'] = True
 
+            n_initializations = 0
         elif command == 'CHANGE': # CHANGE WELL
             # Store current variables into dictionaries
             tissue_param['passive_length']      = tracker.dist_neutral
@@ -192,13 +193,14 @@ while True:
 
     # INITIALIZE CAMERA
     if camera_inits["begin_initialization"]:
-
+        
         img.draw_string(25,80, "CAMERA INITIALIZING", [255,0,0], 4, 1, 1, True, 0)
         utime.sleep_us(1)
         camera_inits["begin_initialization"] = False # FLIP LOW
 
         tracker.reset() # reset tracker
 
+        magnet_parameters['roi'] = ROI_magnet[well]
         stats_m = locate_magnet(img, magnet_tracking_parameters=magnet_parameters)
         stats_p = locate_post(img, post_tracking_parameters=post_parameters)
 
@@ -207,15 +209,15 @@ while True:
             stats_m = [stats_m[0]]
         else:
             extent = 0.6
-            aspectratio = (1,3)
-            k = 0
+            aspectratio = (0.5,3)
+
             for i in range(3):
                 img = sensor.snapshot()
-                thresh, area = determineThresholds(img, magnet_or_post='magnet', tracking_parameters=magnet_parameters, visualize=True)
+                thresh, area = determineThresholds(img, magnet_or_post='magnet', extent=extent, aspectratio=aspectratio, tracking_parameters=magnet_parameters, visualize=True)
                 if thresh == None:
-                    # widen search parameters, try again
-                    extent = extent - 0.1
-                    aspectratio = (aspectratio[0]-0.2, aspectratio[1]+0.5)
+                    # widen parameters, try again
+                    extent = max(extent - 0.1,0)
+                    aspectratio = (max(0,aspectratio[0]-0.2), aspectratio[1]+0.5)
 
                 else: # thresh is not None, therefore found threshold
                     # update dictionary]
@@ -236,58 +238,61 @@ while True:
                 camera_inits['is_initialized'] = False
 
 
-        print(len(stats_m))
         if len(stats_m) == 0:
-            area = area
             extent = 0.6
-            aspectratio = (1,3)
-
+            aspectratio = (0.5,3)
 
             camera_inits["begin_initialization"] = False
             camera_inits["is_initialized"] = False
             continue
+
         else:# ASSUMPTION IS THAT stats_m IS VALID
-            area = stats_m[0].area()
-            extent = stats_m[0].extent()
-            aspectratio = float(stats_m[0].w()) / float(stats_m[0].h())
+            area, extent, aspectratio, centroid_m = get_parameters_from_stats(stats_m[0])
 
             magnet_parameters = store_variables(magnet_parameters,
-                area=(int(area*0.8), int(area*1.2)),
-                extent=extent,
-                aspectratio=(aspectratio * 0.8, aspectratio*1.2)
+                area=(int(area*0.75), int(area*1.5)),
+                extent=extent*0.8,
+                aspectratio=(aspectratio * 0.75, aspectratio*1.5)
                 )
 
             centroids = store_variables(centroids,
-                passive_magnet_centroid =(stats_m[0].cx(), stats_m[0].cy()),
-                magnet_centroid         =np.array((stats_m[0].cx(), stats_m[0].cy())),
+                passive_magnet_centroid = centroid_m,
+                magnet_centroid         = np.array(centroid_m),
                 )
 
             tracker.initPassive(stats_m, stats_p, post_tracking_parameters=post_parameters)
-
+            n_initializations += 1
             tissue_param['passive_length'] = tracker.dist_neutral
 
             utime.sleep_ms(100)
 
-            img = sensor.snapshot()
-
-            stats_m = locate_magnet(img, magnet_tracking_parameters=magnet_parameters)
-            stats_p = locate_post(img, post_tracking_parameters=post_parameters)
-
-            stats_m, foundMagnetFlag = stats_check(stats_m, magnet_parameters, centroids)
-            stats_p, foundPostFlag = stats_check(stats_p, post_parameters, centroids)
-
-            centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
-            centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
-
-
-            value = tracker.processImage(img, PostAndMagnetTracker.computeStretchFrequency, centroid_m, centroid_p)
-
-            stretch = value[0][-1]
-            if stretch < -0.25 or stretch > 0.25:
-                camera_inits['begin_initialization'] = True
-                camera_inits['is_initialized'] = False
-            else:
+            if n_initializations > 3:
                 camera_inits['is_initialized'] = True
+                n_initializations = 0
+                pass
+            else:
+                img = sensor.snapshot()
+
+                stats_m = locate_magnet(img, magnet_tracking_parameters=magnet_parameters)
+                stats_p = locate_post(img, post_tracking_parameters=post_parameters)
+
+                stats_m, foundMagnetFlag = stats_check(stats_m, magnet_parameters, centroids)
+                stats_p, foundPostFlag = stats_check(stats_p, post_parameters, centroids)
+
+                area, extent, aspectratio, centroid_m = get_parameters_from_stats(stats_m[0])
+
+                centroid_m = np.array(centroid_m)
+                centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
+
+
+                value = tracker.processImage(img, PostAndMagnetTracker.computeStretchFrequency, centroid_m, centroid_p)
+
+                stretch = value[0][-1]
+                if stretch < -0.25 or stretch > 0.25:
+                    camera_inits['begin_initialization'] = True
+                    camera_inits['is_initialized'] = False
+                else:
+                    camera_inits['is_initialized'] = True
 
             backup_magnet_parameters = magnet_parameters.copy()
             uart.send_over_serial(-43,
@@ -314,10 +319,10 @@ while True:
             went_through_param_algorithm = True
             c_area, c_extent, c_aspectratio, c_threshold, c_roi = extract_variables(magnet_parameters,
                     ('area','extent','aspectratio','threshold','roi'))
-
-
+            
+            # parameters of blob
             area, extent, aspectratio, centroid_m = get_parameters_from_stats(stats_m[0])
-
+            threshold, direction = calculate_threshold(centroid_area, magnet_parameters['smudgeFactor'], c_threshold)
             actual_parameters = store_variables(actual_parameters,
                 extent=extent,
                 aspectratio=aspectratio,
@@ -326,9 +331,9 @@ while True:
                 )
             # area around centroid
             centroid_box = [ centroid_m[0] - int(tracker.sizeStats/2),
-                    centroid_m[1] - int(tracker.sizeStats/2),
-                    tracker.sizeStats,
-                    tracker.sizeStats]
+                             centroid_m[1] - int(tracker.sizeStats/2),
+                             tracker.sizeStats,
+                             tracker.sizeStats]
             centroid_area = img.get_statistics(roi=centroid_box)
 
             # new region of interest
@@ -339,8 +344,6 @@ while True:
 
             magnet_outline = stats_m[0].rect()
 
-            smudgeFactor = 1.1
-            threshold, direction = calculate_threshold(centroid_area, smudgeFactor, c_threshold)
             # attempting to avoid pixel value outliers that may be present in the center of the magnet
 
             #utime.sleep_ms(500)
@@ -354,11 +357,12 @@ while True:
                 #threshold=(0,int(centroid_area.median() + 3*centroid_area.stdev())),
                 threshold=(0,threshold),
                 roi=mag_roi)
+            
 
-
-
-
-        img.binary([(0,magnet_parameters['threshold'][1])], True, True)
+        binary_filter_options={'thresholds':[(0, magnet_parameters['threshold'][1])],
+                               'invert':True,
+                               'zero':True}
+        img.binary(**binary_filter_options)
         #utime.sleep_ms(2000)
         stats_m = locate_magnet(img, thresh_range=(1,magnet_parameters['threshold'][1]),magnet_tracking_parameters=magnet_parameters)
         stats_p = locate_post(img, post_tracking_parameters=post_parameters)

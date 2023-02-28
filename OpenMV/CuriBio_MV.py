@@ -574,31 +574,32 @@ def calculate_threshold(centroid_area, smudgeFactor, current_threshold):
 
     return threshold, direction
 
-def determineThresholds(area=((1000,5000),(3000,15000)), roi=(250, 600, 160, 320), magnet_or_post='magnet', visualize=False, tracking_parameters=None):
+def determineThresholds(area=((1000,5000),(3000,15000)), roi=(250, 600, 100, 320), extent=0.6, aspectratio=(0.5, 2), circularity=0.5, magnet_or_post='magnet', visualize=False, tracking_parameters=None):
     r = range(0, 100)
     data = []
     for t in r:
         img = sensor.snapshot()
 
         threshold = (0, t)
-        img.binary([(0,threshold)], True, True)
+        binary_filter_options={'thresholds':[threshold],
+                               'invert':True,
+                               'zero':True}
+        img.binary(**binary_filter_options)
 
+        
         if magnet_or_post == 'magnet':
             if tracking_parameters is not None:
-                stats = locate_magnet(  img, (0,t), magnet_tracking_parameters=tracking_parameters)
+                stats = locate_magnet(  img, extent=extent, aspectratio=aspectratio, thresh_range=threshold, magnet_tracking_parameters=tracking_parameters)
                 if visualize==True:
-                    visualizeDetermineThresholds(img, threshold, stats, tracking_parameters)
+                    visualizeDetermineThresholds(img, stats)
             else:
-                stats = locate_magnet(  img, (threshold, (0,0)), (area, (0,0)), roi, aspectratio = (1,3), extent=0.6)
+                stats = locate_magnet(  img, (threshold, (0,0)), (area, (0,0)), roi, aspectratio = aspectratio, extent=extent)
         elif magnet_or_post == 'post':
             if tracking_parameters is not None:
-                stats = locate_post(    img, threshold = (0,t), post_tracking_parameters=tracking_parameters)
+                stats = locate_post(    img, circularity=circularity, thresh_range = (0,t), post_tracking_parameters=tracking_parameters)
             else:
                 stats = locate_post(    img, ((0,0), threshold), ((0,0), area), roi, circularity = 0.5)
         data.append((t, len(stats)))
-
-
-
 
     # Extract data
     idx     = [x[0] for x in data]
@@ -619,19 +620,12 @@ def determineThresholds(area=((1000,5000),(3000,15000)), roi=(250, 600, 160, 320
 
     return thresh, area
 
-def visualizeDetermineThresholds(img, threshold, stats, parameters):
+def visualizeDetermineThresholds(img, stats):
 
-    img.binary([threshold]).to_rgb565()
+    img.to_rgb565()
     for stat in stats:
         img.draw_circle(stat.cx(), stat.cy(), 4,[0,0,155], 1, True)
-
-    roi = parameters['roi']
-    img.draw_rectangle( roi[0],
-                        roi[2],
-                        roi[1]-roi[0],
-                        roi[3]-roi[2],
-                    color=[155,0,0], thickness=2)
-
+    
 
 def FilterByArea(stats, area_range):
     good = []
