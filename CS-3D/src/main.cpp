@@ -40,7 +40,7 @@ long                 dists[4] = {  100,   100,   100,   100}; // [motor steps]
 int MotorStartingPositions[4] = { 500,  500,  500,  500};
 
 // MOTOR WAVEFORM VARIABLES
-uint32_t sections[5] =  {0,       40,       60,        75,      100};
+uint32_t sections[5] =  {0,       40,       50,        90,      100};
 long locPhase[4][5] = {
   {0, dists[0], dists[0],        0,         0},
   {0, dists[1], dists[1],        0,         0},
@@ -77,7 +77,7 @@ int     CameraAcceleration      = 1250; // ACCELERATION OF CAMERA MOTOR (steps/s
 int     CameraResetPosition     = 13000; // WALL POSITION FOR CAMERA RESET (steps)
 int     CameraResetSpeed        = 750; // SPEED OF CAMERA RESET (steps/s)
 int     CameraResetAcceleration = 500; // ACCELERATION OF CAMERA RESET (steps/s^2)
-int     CameraStartingPosition  = 500; // POSITION AWAY FROM WALL (steps)
+int     CameraStartingPosition  = 700; // POSITION AWAY FROM WALL (steps)
 int     CameraPosition          = 0; // CURRENT POSITION OF CAMERA (steps)
 boolean enableStateCamera       = LOW; // CAMERA MOTOR ENABLE/DISABLE FLAG (LOW TO DISABLE)
 boolean ResetCameraFlag         = HIGH; // CAMERA RESET POSITION FLAG
@@ -89,7 +89,7 @@ boolean bringUp = LOW;
 // TIMING VARIABLES
 elapsedMicros timers[4];
 elapsedMicros timerSerial;
-
+elapsedMicros timer_comm;
 // COMMUNICATION VARIABLES
 String command;
 String printstring;
@@ -122,6 +122,8 @@ boolean waitForCameraInit = LOW;
 int k = 0;
 AccelStepper *stArray[4];
 AccelStepper stCamera(1, STEPCAMERA, DIRCAMERA);
+
+int comm_time = 0;
 int checkPhase(elapsedMicros t, uint32_t ts[]) {
   int inPhase = 4;
 
@@ -357,10 +359,10 @@ void setup() {
   pinMode(SLPCAMERA, OUTPUT); digitalWrite(SLPCAMERA, enableStateCamera);
   pinMode (ENCAMERA, OUTPUT); digitalWrite(ENCAMERA, !enableStateCamera);
   // COMMUNICATION SET-UP
-  Serial.begin(115200);
+  Serial.begin(2000000);
   Serial.setTimeout(0);
 
-  OMV.begin(115200); // RX: 0, TX: 1
+  OMV.begin(2000000); // RX: 0, TX: 1
 
   //   OMV.setTimeout(1);
   sizeOfSerialBuffer = sizeof(serial1buffer);
@@ -390,7 +392,9 @@ void setup() {
   //   manualOverride[st] = LOW;
   //   resetFlag[st] = HIGH;
   // }
-  
+  for (int st = 0; st < 4; st++) {
+    motorRetractFlag[st] = LOW;
+  }
 }
 
 String partialReturn(char del) {
@@ -402,6 +406,7 @@ String partialReturn(char del) {
 
 void loop() {
   // COMMUNICATION UPDATE
+  timer_comm = 0;
   if (Serial.available() > 0) { // FROM COMPUTER
     command = Serial.readString();
     Serial.println(command);
@@ -409,6 +414,9 @@ void loop() {
     if (command.substring(0, 8) == "RESETALL") {
       OMV.println("RESET"); // Reset OpenMV
       resetFunc(); // reset Arduino
+    }
+    if (command.substring(0, 3) == "OMV") { // PASSTHROUGH TO OPENMV 
+      OMV.print(command.substring(4, command.length()-1));
     }
     else if (command.substring(0, 3) == "LED") {
       LEDIN = command.substring(4, command.length()-1 ).toInt();
@@ -826,6 +834,8 @@ void loop() {
     }
   }
 
+  comm_time = timer_comm;
+  
   // MOTOR UPDATE
   for (int st = 0; st < 4; st++) {
     // enableState[st] = LOW;
@@ -869,16 +879,26 @@ void loop() {
         switch (motorInitState[st]) {
           case 0: // Somehow got through if-else condition
             break;
-          case 1: // Bring up 500 steps, before initializatoin
+          case 1: // Bring up 500 steps, before initialization
+            if (CameraInited[st] == HIGH) {
+              OMV.print(st);
+              OMV.println("&MOTORINIT&HOME#");
+              motorInitState[st] = 2;
+            }
+            else {
+              motorInitState[st] = 0; // exit out of motor initialization immediately
+            }
+            break;
+          case 2:
             stArray[st]->setMaxSpeed(3000);
             stArray[st]->setAcceleration(2000);
-            stArray[st]->moveTo(-500);
+            stArray[st]->moveTo(-5000);
             stArray[st]->run();
-            OMV.print(st);
-            OMV.println("&MOTORINIT&HOME#");
+            
             
             if (stArray[st]->distanceToGo() == 0) { 
-              motorInitState[st] = 2; // Continue onto next phase
+              motorInitState[st] = 3; // Continue onto next phase
+              stArray[st]->setCurrentPosition(0);
               // CameraInited[st] = LOW; // Force low
               OMV.print(st);
               OMV.println("&INIT#"); // RE-INITIALIZE CAMERA
@@ -886,32 +906,45 @@ void loop() {
               // OMV.println("&MOTORINIT&HOME#");
               }
             break;
-          case 2: // Bring down arbitrarily, monitor for stretch
-            if (CameraInited[st] == HIGH) { // Only begin this phase when camera gets initialized
-              stArray[st]->moveTo(5000); // Arbitrarily down
-              stArray[st]->setMaxSpeed(500); // Medium speed
-              stArray[st]->setAcceleration(250); // Matching acceleration
-              stArray[st]->run();
-              if (stretchValue > 2 && gotStretchFlag==HIGH) { // as bring down, check for stretch value return
-                stArray[st]->setCurrentPosition(0); // set current position to 0 (for relative position)
-                motorInitState[st] = 3; // Continue onto next phase
-                OMV.print(st);
-                OMV.println("&MOTORINIT&HOME#");
-              }
-              else if (stArray[st]->distanceToGo() == 0) { // If reached arbitrarily low destination (too far)
-                MotorRetract(st); // Retract Motor
-                motorInitState[st] = 0; // Stop Motor Initialization
-                OMV.print(st);
-                OMV.println("&MOTORINIT&FAIL#");
-              }
+          case 3: // Bring down 3000 steps, fast
+            stArray[st]->moveTo(3000);
+            stArray[st]->setMaxSpeed(1000); // Fast speed
+            stArray[st]->setAcceleration(3000); // Fast acceleration
+            stArray[st]->run();
+            if (stretchValue > 2 && gotStretchFlag==HIGH) { // as bring down, check for stretch value return
+              stArray[st]->setCurrentPosition(0); // set current position to 0 (for relative position)
+              motorInitState[st] = 5; // Continue onto next phase
+              OMV.print(st);
+              OMV.println("&MOTORINIT&HOME#");
             }
-            else {
-              // motorInitState[st] = 0; // Stop Motor Initialization
+            if (stArray[st]->distanceToGo() == 0) { // if reached 3000 steps, still continue down, but slower
+              motorInitState[st] = 4;
+              stArray[st]->setCurrentPosition(0);
+
             }
             break;
-          case 3: // Bring up 200 steps (somewhat arbitrary), monitor for lack of stretch
-            stArray[st]->setMaxSpeed(50); // slow
-            stArray[st]->setAcceleration(50); // matching acceleration
+          case 4: // Bring down arbitrarily, monitor for stretch
+            stArray[st]->moveTo(750); // Arbitrarily down
+            stArray[st]->setMaxSpeed(50); // Slow speed
+            stArray[st]->setAcceleration(50); // Matching acceleration
+            stArray[st]->run();
+            if (stretchValue > 2 && gotStretchFlag==HIGH) { // as bring down, check for stretch value return
+              stArray[st]->setCurrentPosition(0); // set current position to 0 (for relative position)
+              motorInitState[st] = 5; // Continue onto next phase
+              OMV.print(st);
+              OMV.println("&MOTORINIT&HOME#");
+            }
+            else if (stArray[st]->distanceToGo() == 0) { // If reached arbitrarily low destination (too far)
+              MotorRetract(st); // Retract Motor
+              motorInitState[st] = 0; // Stop Motor Initialization
+              OMV.print(st);
+              OMV.println("&MOTORINIT&FAIL#");
+            }
+            
+            break;
+          case 5: // Bring up 200 steps (somewhat arbitrary), monitor for lack of stretch
+            stArray[st]->setMaxSpeed(25); // slow
+            stArray[st]->setAcceleration(25); // matching acceleration
             stArray[st]->moveTo(-200); // stop at -200 (in case of error)
             stArray[st]->run();
             
@@ -1072,7 +1105,8 @@ void loop() {
       Serial.print(gotStretchFlag);
       Serial.print('&');
       Serial.print(algorithm_magnet_flag);
-      
+      Serial.print('&');
+      Serial.print(timer_comm);
       Serial.println(' ');
       timerSerial = 0;
     }

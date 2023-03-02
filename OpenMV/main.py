@@ -18,17 +18,17 @@ extra_fb.replace(sensor.snapshot())
 
 pin7 = Pin('P7', Pin.IN, Pin.PULL_UP)
 
-uart = Serial(3, 115200, timeout=0)
+uart = Serial(3, baudrate=2000000, timeout=0)
 clock = time.clock()
 
 uart.simulationMode = False
 
 # INITIAL VALUES
 ROI_post = (0, 250, 160, 320)
-ROI_magnet = [  (250, 600, 150, 250),
-                (250, 600, 125, 225),
-                (250, 600, 125, 225),
-                (250, 600, 100, 200)]
+ROI_magnet = [  (250, 600, 150, 300),
+                (250, 600, 150, 300),
+                (250, 600, 150, 300),
+                (250, 600, 100, 250)]
 
 frame_rate = 0
 t0 = utime.ticks_ms()
@@ -45,10 +45,10 @@ blob_centroids = [  {"magnet_centroid":(0,0), "post_centroid": (53,237), "passiv
                     {"magnet_centroid":(0,0), "post_centroid": (53,237), "passive_magnet_centroid": (0,0), "passive_post_centroid": (53,237)},
                     {"magnet_centroid":(0,0), "post_centroid": (53,237), "passive_magnet_centroid": (0,0), "passive_post_centroid": (53,237)}]
 
-magnet_tracking_parameters = [  {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,55), 'roi':ROI_magnet[0], 'smudgeFactor':1.1},
-                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,40), 'roi':ROI_magnet[1], 'smudgeFactor':1.1},
-                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,40), 'roi':ROI_magnet[2], 'smudgeFactor':1.1},
-                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,40), 'roi':ROI_magnet[3], 'smudgeFactor':1.1}]
+magnet_tracking_parameters = [  {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,10), 'roi':ROI_magnet[0], 'smudgeFactor':1.1, 'stats':[]},
+                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,10), 'roi':ROI_magnet[1], 'smudgeFactor':1.1, 'stats':[]},
+                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,10), 'roi':ROI_magnet[2], 'smudgeFactor':1.1, 'stats':[]},
+                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,10), 'roi':ROI_magnet[3], 'smudgeFactor':1.1, 'stats':[]}]
 
 post_tracking_parameters = [    {'area':(3000,15000),'circularity':0.6,'threshold':(0,10), 'roi':ROI_post, 'manual_flag':True, 'post_manual':(53,237)},
                                 {'area':(3000,15000),'circularity':0.6,'threshold':(0,10), 'roi':ROI_post, 'manual_flag':True, 'post_manual':(53,237)},
@@ -133,6 +133,13 @@ while True:
             camera_inits['begin_initialization'] = True
 
             n_initializations = 0
+        elif command=='DEINIT': # UNINITIALIZE TRACKER
+            print('uninitializing')
+            well = temp
+            camera_inits['is_initialized'] = False
+            camera_inits['begin_initialization'] = False
+            tissue_param['passive_length']      = 100
+            camera_initialized[well]            = camera_inits
         elif command == 'CHANGE': # CHANGE WELL
             # Store current variables into dictionaries
             tissue_param['passive_length']      = tracker.dist_neutral
@@ -152,12 +159,13 @@ while True:
             tissue_param        = tissue_parameters[well]
             motor_status        = motor_statuses[well]
             camera_inits        = camera_initialized[well]
+            stats_m             = magnet_parameters['stats']
 
 
             tracker.dist_neutral = tissue_param['passive_length']
             # update from stored variables
-            area, extent, aspectratio, thresh = extract_variables(magnet_parameters,
-                ('area','extent','aspectratio','threshold'))
+            area, extent, aspectratio, thresh, roi = extract_variables(magnet_parameters,
+                ('area','extent','aspectratio','threshold', 'roi'))
             centroid_m, centroid_p = extract_variables(centroids,
                 ('magnet_centroid','post_centroid'))
 
@@ -193,7 +201,7 @@ while True:
 
     # INITIALIZE CAMERA
     if camera_inits["begin_initialization"]:
-        
+
         img.draw_string(25,80, "CAMERA INITIALIZING", [255,0,0], 4, 1, 1, True, 0)
         utime.sleep_us(1)
         camera_inits["begin_initialization"] = False # FLIP LOW
@@ -311,30 +319,31 @@ while True:
         #print('ALGO')
         #utime.sleep_ms(500)
         # perform algorithmic changes to parameters
-        if type(stats_m[0]) == type(Centroid((0,0))):
-            threshold = magnet_parameters['threshold']
+        #print(len(stats_m))
+        if len(stats_m) == 0:
+            thresh = magnet_parameters['threshold']
             went_through_param_algorithm = False
 
         else:
             went_through_param_algorithm = True
-            c_area, c_extent, c_aspectratio, c_threshold, c_roi = extract_variables(magnet_parameters,
+            c_area, c_extent, c_aspectratio, c_thresh, c_roi = extract_variables(magnet_parameters,
                     ('area','extent','aspectratio','threshold','roi'))
-            
+
             # parameters of blob
             area, extent, aspectratio, centroid_m = get_parameters_from_stats(stats_m[0])
-            threshold, direction = calculate_threshold(centroid_area, magnet_parameters['smudgeFactor'], c_threshold)
-            actual_parameters = store_variables(actual_parameters,
-                extent=extent,
-                aspectratio=aspectratio,
-                centroid=centroid_m,
-                area=area
-                )
             # area around centroid
             centroid_box = [ centroid_m[0] - int(tracker.sizeStats/2),
                              centroid_m[1] - int(tracker.sizeStats/2),
                              tracker.sizeStats,
                              tracker.sizeStats]
             centroid_area = img.get_statistics(roi=centroid_box)
+            thresh, direction = calculate_threshold(centroid_area, magnet_parameters['smudgeFactor'], c_thresh)
+            actual_parameters = store_variables(actual_parameters,
+                extent=extent,
+                aspectratio=aspectratio,
+                centroid=centroid_m,
+                area=area
+                )
 
             # new region of interest
             mag_roi = ( stats_m[0].cx()-int(tracker.sizeROIy/2),
@@ -349,20 +358,20 @@ while True:
             #utime.sleep_ms(500)
 
             # find magnet, using new parameters
-            print(actual_parameters)
+            #print(actual_parameters)
             magnet_parameters = store_variables(magnet_parameters,
                 area=(int(area*0.5), int(area*2.5)),
                 extent=round(extent*0.7,2),
                 aspectratio=(round(aspectratio*0.5,2), round(aspectratio*1.5,2)),
                 #threshold=(0,int(centroid_area.median() + 3*centroid_area.stdev())),
-                threshold=(0,threshold),
+                threshold=(0,thresh),
                 roi=mag_roi)
-            
+                
+        #print(went_through_param_algorithm)
 
-        binary_filter_options={'thresholds':[(0, magnet_parameters['threshold'][1])],
-                               'invert':True,
+        binary_filter_options={'invert':True,
                                'zero':True}
-        img.binary(**binary_filter_options)
+        img.binary([(0, magnet_parameters['threshold'][1])],**binary_filter_options)
         #utime.sleep_ms(2000)
         stats_m = locate_magnet(img, thresh_range=(1,magnet_parameters['threshold'][1]),magnet_tracking_parameters=magnet_parameters)
         stats_p = locate_post(img, post_tracking_parameters=post_parameters)
@@ -375,11 +384,15 @@ while True:
         found_backup_magnet_flag = False
         #utime.sleep_ms(500)
         if foundMagnetFlag==False:
-            threshold, stats_m, area, extent, aspectratio, roi = determineThresholdDuringTracking(img, tracking_parameters=magnet_parameters)
+            thresh, stats_m, area, extent, aspectratio, roi = determineThresholdDuringTracking(img, tracking_parameters=magnet_parameters)
             if len(stats_m) > 0:
                 foundMagnetFlag = True
                 found_backup_magnet_flag = True
-            
+            else:
+                stats_m = []
+                
+        
+
 
         if went_through_param_algorithm:
             if draw_outlines == True:
@@ -395,11 +408,12 @@ while True:
                     color=255, thickness=2)
 
         #print(stats_m)
-        centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
-        centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
-
-
-        value = tracker.processImage(img, PostAndMagnetTracker.computeStretchFrequency, centroid_m, centroid_p)
+        if foundMagnetFlag:
+            centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
+            centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
+    
+    
+            value = tracker.processImage(img, PostAndMagnetTracker.computeStretchFrequency, centroid_m, centroid_p)
 
         ret, rotated = tracker.showTrackingOscilloscope(img, value, well, centroids, magnet_parameters)
 
@@ -416,6 +430,7 @@ while True:
 
         #foundMagnetFlag = True
         if foundMagnetFlag:
+            magnet_parameters['stats'] = stats_m
             if found_backup_magnet_flag:
                 magnet_or_backup = 'backup'
                 magic = -36
@@ -436,8 +451,8 @@ while True:
             magic = -37
 
 
-        print("Found {:17} ({}) ".format(magnet_or_backup, round(frame_rate,1)), end='')
-        [print("{}, ".format(value), end='') for key, value in magnet_parameters.items()]
+        #print("Found {:17} ({}) ".format(magnet_or_backup, round(frame_rate,1)), end='')
+        #[print("{}, ".format(value), end='') for key, value in magnet_parameters.items()]
         uart.send_over_serial(magic,
             [ tracker.tic,
               round(stretch, 1),
@@ -461,7 +476,7 @@ while True:
     if toc > tracker.tic:
         frame_rate = 1000. / (toc-tracker.tic)
         tracker.setFps(frame_rate)
-        print("{},{}, ".format(round(frame_rate,1), stop), end='')
-        [print("{}: {}, ".format(key,value), end='') for key, value in magnet_parameters.items()]
+        #print("{},{}, ".format(round(frame_rate,1), stop), end='')
+        #[print("{}: {}, ".format(key,value), end='') for key, value in magnet_parameters.items()]
 
         uart.send_over_serial(-47, [tracker.tic], print_flag = True)

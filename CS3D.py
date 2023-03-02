@@ -77,14 +77,19 @@ class CS3D:
         self.bottom_screen_font = pygame.font.SysFont("monospace", 14)
         self.t_display = time()
 
-        self.well_labels     = ['D',                         'C',                        'B',                        'A']
-        self.well_locations  = [0,                           3800,                       7700,                       11500]
-        self.motors          = [Motor(0),                    Motor(1),                   Motor(2),                   Motor(3)]
-        self.frames          = [tk.Frame(self.root),         tk.Frame(self.root),        tk.Frame(self.root),        tk.Frame(self.root)]
-        self.button_move_to  = [tk.Button(self.frames[0]),   tk.Button(self.frames[1]),  tk.Button(self.frames[2]),  tk.Button(self.frames[3])]
-        self.button_retract  = [tk.Button(self.frames[0]),   tk.Button(self.frames[1]),  tk.Button(self.frames[2]),  tk.Button(self.frames[3])]
-        self.button_start    = [tk.Button(self.frames[0]),   tk.Button(self.frames[1]),  tk.Button(self.frames[2]),  tk.Button(self.frames[3])]
-        self.button_waveform = [tk.Button(self.frames[0]),   tk.Button(self.frames[1]),  tk.Button(self.frames[2]),  tk.Button(self.frames[3])]
+        self.well_labels        = ['D',                         'C',                        'B',                        'A']
+        self.well_locations     = [0,                           4000,                       7900,                       11500]
+        self.motors             = [Motor(0),                    Motor(1),                   Motor(2),                   Motor(3)]
+        self.frames             = [tk.Frame(self.root),         tk.Frame(self.root),        tk.Frame(self.root),        tk.Frame(self.root)]
+        self.button_move_to     = [tk.Button(self.frames[0]),   tk.Button(self.frames[1]),  tk.Button(self.frames[2]),  tk.Button(self.frames[3])]
+        self.button_retract     = [tk.Button(self.frames[0]),   tk.Button(self.frames[1]),  tk.Button(self.frames[2]),  tk.Button(self.frames[3])]
+        self.button_start       = [tk.Button(self.frames[0]),   tk.Button(self.frames[1]),  tk.Button(self.frames[2]),  tk.Button(self.frames[3])]
+        self.button_waveform    = [tk.Button(self.frames[0]),   tk.Button(self.frames[1]),  tk.Button(self.frames[2]),  tk.Button(self.frames[3])]
+        self.button_camera_up   = [tk.Button(self.frames[0]),   tk.Button(self.frames[1]),  tk.Button(self.frames[2]),  tk.Button(self.frames[3])]
+        self.button_camera_down = [tk.Button(self.frames[0]),   tk.Button(self.frames[1]),  tk.Button(self.frames[2]),  tk.Button(self.frames[3])]
+        
+
+        
         self.motor_display   = [tk.Label(self.frames[0]),    tk.Label(self.frames[1]),   tk.Label(self.frames[2]),   tk.Label(self.frames[3])]
 
         self.rise            = [tk.IntVar(self.waveform_root, 25),    tk.IntVar(self.waveform_root, 25),   tk.IntVar(self.waveform_root, 25),   tk.IntVar(self.waveform_root, 25)]
@@ -142,15 +147,26 @@ class CS3D:
         self.button_reset_camera_position   = self.configure_button(tk.Button(self.root), "Reset Camera\nPosition", self.reset_camera_position, 10, [100, 430, 100, 50])
         self.button_retract_all_motors      = self.configure_button(tk.Button(self.root), "Retract All\nMotors",    self.retract_all_motors,    10, [200, 430, 100, 50])
         self.button_stop_all_motors         = self.configure_button(tk.Button(self.root), "Stop All\nMotors",       self.stop_all_motors,       10, [0, 430, 100, 50])
-        self.button_initialize_camera       = self.configure_button(tk.Button(self.root), "Initialize\nCamera",     self.initialize_camera,     10, [350, 260, 100, 40])
-        self.button_home_motor              = self.configure_button(tk.Button(self.root), "Home Motor",             self.home_motor,            10, [350, 300, 100, 25])
-        self.button_adj_up                  = self.configure_button(tk.Button(self.root), "-",                      lambda: self.send_adj(0),   10, [330, 302.5, 20, 20])
-        self.button_adj_down                = self.configure_button(tk.Button(self.root), "+",                      lambda: self.send_adj(1),   10, [450, 302.5, 20, 20])
+        
+        self.frame_initialization           = tk.Frame(self.root)
+        self.button_initialize_camera       = self.configure_button(tk.Button(self.frame_initialization), "Initialize\nCamera",     self.initialize_camera,     10, [20, 0, 100, 40])
+        self.button_deinitialize_camera     = self.configure_button(tk.Button(self.frame_initialization), "De-initialize\nCamera",  self.deinitialize_camera,   10, [20, 40, 100, 40])
+        self.button_home_motor              = self.configure_button(tk.Button(self.frame_initialization), "Home Motor",             self.home_motor,            10, [20, 80, 100, 25])
+        self.button_adj_up                  = self.configure_button(tk.Button(self.frame_initialization), "-",                      lambda: self.send_adj(0),   10, [0, 82.5, 20, 20])
+        self.button_adj_down                = self.configure_button(tk.Button(self.frame_initialization), "+",                      lambda: self.send_adj(1),   10, [120, 82.5, 20, 20])
+        self.button_toggle_feedback         = self.configure_button(tk.Button(self.frame_initialization), "Toggle Feedback\n(off)", command=self.toggle_feedback, fontsize=10, location=[10, 110, 120, 40])
+        
         self.entry_command                  = self.configure_entry(tk.Entry(self.root),     textvariable=self.command, location=[25, 500, -1, -1], fontsize=10 )
         self.entry_command.bind('<Return>', func=lambda val: self.send_command())
         
-        self.button_toggle_feedback         = self.configure_button(tk.Button(self.root), "Toggle Feedback\n(off)", command=self.toggle_feedback, fontsize=10, location=[340, 350, 120, 40])
         printfunc('adding frames for each camera')
+        self.frame_initialization.configure({  'background':'white', 
+                                        'borderwidth':0,
+                                        'relief':'groove', 
+                                        'width':150, 
+                                        'height':150})
+        self.frame_initialization.place(x=330, y=315)
+
         for i in range(4):
             def move_camera(motor=i):
                 string = "C{},{}\n".format(motor, self.well_locations[motor])
@@ -163,11 +179,12 @@ class CS3D:
                 self.button_move_to[self.well_motor].configure(borderwidth=7)
                 self.button_move_to[self.well_motor].configure(state='disabled')
                 
-                self.configure_button(self.button_initialize_camera,    location=[350, 315-(motor*105), 100, 40])
-                self.configure_button(self.button_home_motor,           location=[350, 350-(motor*105), 100, 25])
-                self.configure_button(self.button_adj_down,             location=[450, 350-(motor*105), 20, 20])
-                self.configure_button(self.button_adj_up,               location=[330, 350-(motor*105), 20, 20])
-                self.configure_button(self.button_toggle_feedback,      location=[340, 400-(motor*105), 120, 40])
+                self.frame_initialization.place(x=330, y=315-(motor*105))
+                # self.configure_button(self.button_initialize_camera,    location=[350, 315-(motor*105), 100, 40])
+                # self.configure_button(self.button_home_motor,           location=[350, 350-(motor*105), 100, 25])
+                # self.configure_button(self.button_adj_down,             location=[450, 350-(motor*105), 20, 20])
+                # self.configure_button(self.button_adj_up,               location=[330, 350-(motor*105), 20, 20])
+                # self.configure_button(self.button_toggle_feedback,      location=[340, 400-(motor*105), 120, 40])
                 # print([[350, 315-(i*105), 100, 40]])
             def retract_motor(motor=i):
                 string = "X{}\n".format(motor)
@@ -186,6 +203,15 @@ class CS3D:
                 self.configure_label(self.title_waveform_dialog, text='Row {}'.format(self.well_labels[self.waveform_motor]))
                 self.configure_button(self.button_send_waveform, text='Send to Row {}'.format(self.well_labels[motor]))
                 self.plot_waveform()
+            def move_camera_up(motor=i):
+                string = "C{},{}\n".format(motor, self.well_locations[motor]+100)
+                self.well_locations[motor]=self.well_locations[motor] + 100
+                self.write_to_motors(string)
+            def move_camera_down(motor=i):
+                string = "C{},{}\n".format(motor, self.well_locations[motor]-100)
+                self.well_locations[motor]=self.well_locations[motor] - 100
+                self.write_to_motors(string)
+
             # PLACE FRAME FOR MOTOR
             self.frames[i].configure({  'background':'white', 
                                         'borderwidth':2,
@@ -200,6 +226,9 @@ class CS3D:
             self.configure_button(self.button_start[i],     'Start', enable_motor, location=[0,60,50,25], fontsize=8)
             self.configure_button(self.button_waveform[i],  'Shape', open_waveform_dialog, location=[105,60,50,25], fontsize=8)
             self.button_start[i].configure(self.enable_motor_configuration('stopped'))
+            
+            self.configure_button(self.button_camera_up[i], "+", move_camera_up, 12, [200, 0, 25, 25])
+            self.configure_button(self.button_camera_down[i], "-", move_camera_down, 12, [150, 0, 25, 25])
             
             # ADD LABELS
             self.configure_label(tk.Label(self.frames[i]), ": stretch parameters", fontsize=8, justify=tk.LEFT, location=[160, 60, -1, -1])
@@ -560,7 +589,7 @@ class CS3D:
             if len(stage_information) < 6:
                 return 0
             
-            camera_row, camera_enable, camera_position, camera_well, got_stretch, algorithm_magnet_flag = tuple(stage_information)
+            camera_row, camera_enable, camera_position, camera_well, got_stretch, algorithm_magnet_flag, comm_time = tuple(stage_information)
             try: self.camera_row = int(camera_row)
             except ValueError: self.camera_row = camera_row
 
@@ -569,7 +598,8 @@ class CS3D:
             self.camera_well    = int(camera_well)
             self.got_stretch   = bool(int(got_stretch))
             self.algorithm_magnet_flag = bool(int(algorithm_magnet_flag))
-
+            self.comm_time             = int(comm_time)
+            printfunc(self.comm_time)
             # print("{}, {}, {}, {}, {}".format(temp, t, tracking_information, motor_information, stage_information))
             # temp, t, camera_information, motor_information[0], motor_information[1], motor_information[2], motor_information[3], stage_information  = tuple(string.split(';'))
         
@@ -610,6 +640,9 @@ class CS3D:
         string = 'INIT\n'
         self.write_to_motors(string)
         printfunc('Initializing camera.')
+    def deinitialize_camera(self):
+        string = "OMV,{}&DEINIT\n".format(self.well_motor)
+        self.write_to_motors(string)
     def home_motor(self):
         string = "MOTORINIT&{}\n".format(self.well_motor)
         self.write_to_motors(string)
@@ -743,7 +776,7 @@ class EstablishConnections:
                 continue
             else:  
                 try:
-                    self.conn = Serial(port, baudrate=9600, timeout=1)
+                    self.conn = Serial(port, baudrate=2000000, timeout=1)
                     self.connected_to_motors = True
                     printfunc('Connected to motors. ')
                     continue
