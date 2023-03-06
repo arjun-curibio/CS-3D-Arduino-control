@@ -12,8 +12,11 @@ sensor.set_auto_whitebal(True)
 #sensor.set_auto_exposure(False, 5000)
 sensor.skip_frames(time = 1000)
 
+sensor_windowing = (0, 80, sensor.width(), 250)
+sensor.set_windowing(sensor_windowing)
 
-extra_fb = sensor.alloc_extra_fb(sensor.width(), sensor.height(), sensor.GRAYSCALE)
+
+extra_fb = sensor.alloc_extra_fb(sensor_windowing[2], sensor_windowing[3], sensor.GRAYSCALE)
 extra_fb.replace(sensor.snapshot())
 
 pin7 = Pin('P7', Pin.IN, Pin.PULL_UP)
@@ -25,11 +28,12 @@ uart.simulationMode = False
 
 # INITIAL VALUES
 ROI_post = (0, 250, 160, 320)
-ROI_magnet = [  (250, 600, 150, 300),
+ROI_magnet = [  (250, 600, 0, 200),
                 (250, 600, 150, 300),
                 (250, 600, 150, 300),
-                (250, 600, 100, 250)]
+                (250, 600, 150, 300)]
 
+default_magnet_threshold = (0, 10)
 frame_rate = 0
 t0 = utime.ticks_ms()
 
@@ -40,20 +44,20 @@ draw_outlines = True
 # ROW PARAMTERS (n=4)
 row_labels      = ['D',     'C',    'B',    'A']
 
-blob_centroids = [  {"magnet_centroid":(0,0), "post_centroid": (53,237), "passive_magnet_centroid": (0,0), "passive_post_centroid": (53,237)},
-                    {"magnet_centroid":(0,0), "post_centroid": (53,237), "passive_magnet_centroid": (0,0), "passive_post_centroid": (53,237)},
-                    {"magnet_centroid":(0,0), "post_centroid": (53,237), "passive_magnet_centroid": (0,0), "passive_post_centroid": (53,237)},
-                    {"magnet_centroid":(0,0), "post_centroid": (53,237), "passive_magnet_centroid": (0,0), "passive_post_centroid": (53,237)}]
+blob_centroids = [  {"magnet_centroid":(0,0), "post_centroid": (53,125), "passive_magnet_centroid": (0,0), "passive_post_centroid": (53,237)},
+                    {"magnet_centroid":(0,0), "post_centroid": (53,125), "passive_magnet_centroid": (0,0), "passive_post_centroid": (53,237)},
+                    {"magnet_centroid":(0,0), "post_centroid": (53,125), "passive_magnet_centroid": (0,0), "passive_post_centroid": (53,237)},
+                    {"magnet_centroid":(0,0), "post_centroid": (53,125), "passive_magnet_centroid": (0,0), "passive_post_centroid": (53,237)}]
 
-magnet_tracking_parameters = [  {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,10), 'roi':ROI_magnet[0], 'smudgeFactor':1.1, 'stats':[]},
-                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,10), 'roi':ROI_magnet[1], 'smudgeFactor':1.1, 'stats':[]},
-                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,10), 'roi':ROI_magnet[2], 'smudgeFactor':1.1, 'stats':[]},
-                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':(0,10), 'roi':ROI_magnet[3], 'smudgeFactor':1.1, 'stats':[]}]
+magnet_tracking_parameters = [  {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':default_magnet_threshold, 'roi':ROI_magnet[0], 'smudgeFactor':1.3, 'stats':[]},
+                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':default_magnet_threshold, 'roi':ROI_magnet[1], 'smudgeFactor':1.3, 'stats':[]},
+                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':default_magnet_threshold, 'roi':ROI_magnet[2], 'smudgeFactor':1.3, 'stats':[]},
+                                {'area':(1000,4000),'extent':0.6,'aspectratio':(0.5,3),'threshold':default_magnet_threshold, 'roi':ROI_magnet[3], 'smudgeFactor':1.3, 'stats':[]}]
 
-post_tracking_parameters = [    {'area':(3000,15000),'circularity':0.6,'threshold':(0,10), 'roi':ROI_post, 'manual_flag':True, 'post_manual':(53,237)},
-                                {'area':(3000,15000),'circularity':0.6,'threshold':(0,10), 'roi':ROI_post, 'manual_flag':True, 'post_manual':(53,237)},
-                                {'area':(3000,15000),'circularity':0.6,'threshold':(0,10), 'roi':ROI_post, 'manual_flag':True, 'post_manual':(53,237)},
-                                {'area':(3000,15000),'circularity':0.6,'threshold':(0,10), 'roi':ROI_post, 'manual_flag':True, 'post_manual':(53,237)}]
+post_tracking_parameters = [    {'area':(3000,15000),'circularity':0.6,'threshold':(0,10), 'roi':ROI_post, 'manual_flag':True, 'post_manual':(53,125)},
+                                {'area':(3000,15000),'circularity':0.6,'threshold':(0,10), 'roi':ROI_post, 'manual_flag':True, 'post_manual':(53,125)},
+                                {'area':(3000,15000),'circularity':0.6,'threshold':(0,10), 'roi':ROI_post, 'manual_flag':True, 'post_manual':(53,125)},
+                                {'area':(3000,15000),'circularity':0.6,'threshold':(0,10), 'roi':ROI_post, 'manual_flag':True, 'post_manual':(53,125)}]
 
 tissue_parameters = [   {"passive_length":100},
                         {"passive_length":100},
@@ -65,16 +69,17 @@ motor_statuses = [{"homing_status": 0, "enabled: ":False, "position": 0},
                   {"homing_status": 0, "enabled: ":False, "position": 0},
                   {"homing_status": 0, "enabled: ":False, "position": 0}]
 
-camera_initialized = [  {"begin_initialization": False, "is_initialized": False},
-                        {"begin_initialization": False, "is_initialized": False},
-                        {"begin_initialization": False, "is_initialized": False},
-                        {"begin_initialization": False, "is_initialized": False}]
+camera_initialized = [  {"begin_initialization": False, "is_initialized": False, "remove_processing": False},
+                        {"begin_initialization": False, "is_initialized": False, "remove_processing": False},
+                        {"begin_initialization": False, "is_initialized": False, "remove_processing": False},
+                        {"begin_initialization": False, "is_initialized": False, "remove_processing": False}]
 
 actual_parameters = {   'centroid':(0,0),
                         'extent':0.6,
                         'aspectratio':1.2,
                         'area':1500}
 
+blank_magnet_parameters = magnet_tracking_parameters[0]
 # blob_centroids = {"magnet_centroid":(0,0), "post_centroid": (53,237), "passive_magnet_centroid": (0,0), "passive_post_centroid": (53,237)}
 # magnet_tracking_parameters = {'area':(1000,3000),'extent':0.6,'aspectratio':(1,3),'threshold':(0,40), 'roi':ROI_magnet}
 # post_tracking_parameters = {'area':(3000,15000),'circularity':0.6,'threshold':(0,10), 'roi':ROI_post, 'manual_flag':True, 'post_manual':(53,237)}
@@ -118,7 +123,8 @@ tracker = PostAndMagnetTracker(
     ROI_post, ROI_magnet,                                               # ROI
     CircularBufferSize=CircularBufferSize)
 
-
+n_initializations = 0
+overwrite_roi = False
 while True:
     clock.tick()
     tracker.tic = utime.ticks_ms()-t0
@@ -131,15 +137,23 @@ while True:
         if command=='INIT': # INITIALIZE TRACKER
             well = temp
             camera_inits['begin_initialization'] = True
-
+            
             n_initializations = 0
-        elif command=='DEINIT': # UNINITIALIZE TRACKER
-            print('uninitializing')
-            well = temp
+        if command=='DEINIT':
+            well=temp
             camera_inits['is_initialized'] = False
-            camera_inits['begin_initialization'] = False
-            tissue_param['passive_length']      = 100
-            camera_initialized[well]            = camera_inits
+            camera_inits['remove_processing'] = False
+        elif command=='REMOVEPROCESSING': # UNINITIALIZE TRACKER
+            print('removing processing')
+            well = temp
+            camera_inits['remove_processing'] = not camera_inits['remove_processing']
+
+            # camera_inits['is_initialized'] = False
+            # camera_inits['begin_initialization'] = False
+
+            # tissue_param['passive_length']      = 100
+            # magnet_parameters['threshold']      = default_magnet_threshold
+            # camera_initialized[well]            = camera_inits
         elif command == 'CHANGE': # CHANGE WELL
             # Store current variables into dictionaries
             tissue_param['passive_length']      = tracker.dist_neutral
@@ -174,7 +188,13 @@ while True:
             centroids['passive_post_centroid'] = (int(info[0]), int(info[1]))
             centroids['post_centroid']         = (int(info[0]), int(info[1]))
             post_parameters['post_manual']     = (int(info[0]), int(info[1]))
-
+            if camera_inits["is_initialized"]:
+                tissue_param['passive_length'] = tracker.set_passive_length(centroids)
+        elif command == 'ROI':
+            print('ROI')
+            magnet_parameters['roi'] = tuple([int(i) for i in info[:4]])
+            overwrite_roi = True
+            print(info)
 
     else:
         if camera_inits["is_initialized"] == False: # if not currently initialized
@@ -195,21 +215,31 @@ while True:
             frame_rate = 1000. / (toc-tracker.tic)
         continue
 
-    if post_parameters['manual_flag']:
+    if camera_inits['remove_processing']:
+        uart.send_over_serial(-29, [tracker.tic], print_flag = False)
+
+        continue
+    if not camera_inits["is_initialized"] and post_parameters['manual_flag']:
         img.draw_circle(centroids['post_centroid'][0], centroids['post_centroid'][1],
             10,color=255, fill=True)
+    
+    if camera_inits["is_initialized"] == False:
+        img.draw_rectangle( magnet_parameters['roi'][0],
+                            magnet_parameters['roi'][2],
+                            magnet_parameters['roi'][1]-magnet_parameters['roi'][0],
+                            magnet_parameters['roi'][3]-magnet_parameters['roi'][2], [255,255,255], 3, False)
 
     # INITIALIZE CAMERA
     if camera_inits["begin_initialization"]:
 
-        img.draw_string(25,80, "CAMERA INITIALIZING", [255,0,0], 4, 1, 1, True, 0)
+        # img.draw_string(25,80, "CAMERA INITIALIZING", [255,0,0], 4, 1, 1, True, 0)
         utime.sleep_us(1)
         camera_inits["begin_initialization"] = False # FLIP LOW
 
         tracker.reset() # reset tracker
 
-        magnet_parameters['roi'] = ROI_magnet[well]
-        stats_m = locate_magnet(img, magnet_tracking_parameters=magnet_parameters)
+        #magnet_parameters['roi'] = ROI_magnet[well]
+        stats_m = locate_magnet(img, magnet_tracking_parameters=blank_magnet_parameters)
         stats_p = locate_post(img, post_tracking_parameters=post_parameters)
 
         if len(stats_m) > 0:
@@ -237,8 +267,12 @@ while True:
 
                     stats_m = locate_magnet(img, magnet_tracking_parameters=magnet_parameters)
                     # choose best
-                    stats_m = [stats_m[0]]
-                    break
+                    if len(stats_m) > 0:
+                        stats_m = [stats_m[0]]
+                    
+                        break
+                    else:
+                        thresh == None
 
             if thresh == None:
                 # DID NOT FIND MAGNET
@@ -328,7 +362,7 @@ while True:
             went_through_param_algorithm = True
             c_area, c_extent, c_aspectratio, c_thresh, c_roi = extract_variables(magnet_parameters,
                     ('area','extent','aspectratio','threshold','roi'))
-
+            
             # parameters of blob
             area, extent, aspectratio, centroid_m = get_parameters_from_stats(stats_m[0])
             # area around centroid
@@ -353,6 +387,9 @@ while True:
 
             magnet_outline = stats_m[0].rect()
 
+            if overwrite_roi == True:
+                mag_roi = magnet_parameters['roi']
+                overwrite_roi = False
             # attempting to avoid pixel value outliers that may be present in the center of the magnet
 
             #utime.sleep_ms(500)
@@ -389,7 +426,14 @@ while True:
                 foundMagnetFlag = True
                 found_backup_magnet_flag = True
             else:
-                stats_m = []
+                stats_m = locate_magnet(img, thresh_range=(1,magnet_parameters['threshold'][1]),magnet_tracking_parameters=backup_magnet_parameters)
+                stats_m, foundMagnetFlag = stats_check(stats_m, backup_magnet_parameters, centroids)
+                
+                # stats_p, foundPostFlag = stats_check(stats_p, post_parameters, centroids)
+                if foundMagnetFlag == True:
+                    found_backup_magnet_flag = True
+                else:
+                    stats_m = []
                 
         
 
@@ -411,7 +455,7 @@ while True:
         if foundMagnetFlag:
             centroid_m = np.array((stats_m[0].cx(), stats_m[0].cy()))
             centroid_p = np.array((stats_p[0].cx(), stats_p[0].cy()))
-    
+            centroids['magnet_centroid'] = np.array(centroid_m)
     
             value = tracker.processImage(img, PostAndMagnetTracker.computeStretchFrequency, centroid_m, centroid_p)
 
@@ -470,13 +514,27 @@ while True:
 
 
         tracker.maxTracker.foundMax = 0
+
+        if post_parameters['manual_flag']:
+            img.draw_circle(centroids['post_centroid'][0], centroids['post_centroid'][1],
+                10,color=255, fill=True)
+        
         continue
 
     toc = utime.ticks_ms() - t0
     if toc > tracker.tic:
         frame_rate = 1000. / (toc-tracker.tic)
         tracker.setFps(frame_rate)
+        
+        tracker.title_rect = (0, 0, sensor.width(), 40)
+        img.draw_rectangle(tracker.title_rect, color=10, fill=True)
+        title = "Row {}".format(row_labels[well])
+        title += " / {:>6.1f} s".format(tracker.tic/1000)
+        title += " / FPS = {:>3.1f}".format(tracker.fps)
+        
+        tracker.showTitle(img, title)
+
         #print("{},{}, ".format(round(frame_rate,1), stop), end='')
         #[print("{}: {}, ".format(key,value), end='') for key, value in magnet_parameters.items()]
 
-        uart.send_over_serial(-47, [tracker.tic], print_flag = True)
+        uart.send_over_serial(-47, [tracker.tic], print_flag = False)

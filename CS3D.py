@@ -10,6 +10,7 @@ from math import floor
 from datetime import datetime
 from serial.tools.list_ports import comports
 from time import time
+import cv2
 class Motor:
     def __init__(self, ID):
         self.ID = ID
@@ -70,7 +71,8 @@ class CS3D:
         self.conn = self.ports.connect_to_motors()
 
         pygame.init()
-        self.screen = pygame.display.set_mode((640,480), pygame.DOUBLEBUF)
+        self.screen_size = (648, 480)
+        self.screen = pygame.display.set_mode(self.screen_size)
         self.got_image = False
         self.t0 = time()
         self.screen_font = pygame.font.SysFont("monospace", 33)
@@ -78,7 +80,7 @@ class CS3D:
         self.t_display = time()
 
         self.well_labels        = ['D',                         'C',                        'B',                        'A']
-        self.well_locations     = [0,                           4000,                       7900,                       11500]
+        self.well_locations     = [0,                           3900,                       7800,                       11600]
         self.motors             = [Motor(0),                    Motor(1),                   Motor(2),                   Motor(3)]
         self.frames             = [tk.Frame(self.root),         tk.Frame(self.root),        tk.Frame(self.root),        tk.Frame(self.root)]
         self.button_move_to     = [tk.Button(self.frames[0]),   tk.Button(self.frames[1]),  tk.Button(self.frames[2]),  tk.Button(self.frames[3])]
@@ -121,9 +123,18 @@ class CS3D:
         self.camera_enable = False
         self.camera_position = 0
         self.camera_well = 0
-        
+        self.running_processing = True
+        self.save_image_as_video = False
+        self.videowriter = None
+
         self.got_stretch   = False
         self.algorithm_magnet_flag = False
+
+        self.x1, self.x2, self.y1, self.y2 = 0,0,0,0
+        self.rect_making = False
+        self.make_a_rect = False
+
+        self.frame_rate = 30
         # self.waveform_root.protocol("MW_DELETE_WINDOW", self.waveform_window_close)
 
         # CONFIGURE WAVEFORM DIALOG
@@ -150,7 +161,7 @@ class CS3D:
         
         self.frame_initialization           = tk.Frame(self.root)
         self.button_initialize_camera       = self.configure_button(tk.Button(self.frame_initialization), "Initialize\nCamera",     self.initialize_camera,     10, [20, 0, 100, 40])
-        self.button_deinitialize_camera     = self.configure_button(tk.Button(self.frame_initialization), "De-initialize\nCamera",  self.deinitialize_camera,   10, [20, 40, 100, 40])
+        self.button_record_video            = self.configure_button(tk.Button(self.frame_initialization), "Record\nVideo",          self.toggle_video_recording,10, [20, 40, 100, 40])
         self.button_home_motor              = self.configure_button(tk.Button(self.frame_initialization), "Home Motor",             self.home_motor,            10, [20, 80, 100, 25])
         self.button_adj_up                  = self.configure_button(tk.Button(self.frame_initialization), "-",                      lambda: self.send_adj(0),   10, [0, 82.5, 20, 20])
         self.button_adj_down                = self.configure_button(tk.Button(self.frame_initialization), "+",                      lambda: self.send_adj(1),   10, [120, 82.5, 20, 20])
@@ -158,7 +169,7 @@ class CS3D:
         
         self.entry_command                  = self.configure_entry(tk.Entry(self.root),     textvariable=self.command, location=[25, 500, -1, -1], fontsize=10 )
         self.entry_command.bind('<Return>', func=lambda val: self.send_command())
-        
+        self.entry_command.bind
         printfunc('adding frames for each camera')
         self.frame_initialization.configure({  'background':'white', 
                                         'borderwidth':0,
@@ -240,6 +251,7 @@ class CS3D:
 
     def send_command(self):
         if len(self.command.get()) > 0:
+            self.last_command = self.command.get()
             self.write_to_motors("{}\n".format(self.command.get()))
             self.command.set('')
             self.entry_command.update()
@@ -474,6 +486,8 @@ class CS3D:
         
     
     def update(self):
+        self.t = time() - self.t0
+        # print(self.frame_rate)
         # print(round(time()-self.t0, 1))        
         # if self.waveform_root.winfo_viewable() == 1:
         #     self.plot_waveform()
@@ -496,17 +510,47 @@ class CS3D:
                 self.got_image = False
 
             if not pyopenmv.script_running(): # stopped running the script
-                self.screen.blit(self.screen_font.render("NOT CONNECTED TO CAMERA!", 1, (255, 0, 0)), (0, 0))
+                self.screen.blit(self.screen_font.render("ERROR.  RESTARTING, CAMERA.", 1, (255, 0, 0)), (0, 100))
                 pygame.display.flip()
+                # attempt to restart openmv
+                pyopenmv.disconnect()
+                t0 = time()
+                while time() < t0+3:
+                    pass
+                self.ports.connect_to_camera()
 
+                
+
+            if self.make_a_rect:
+                top_left = (min(self.x1, self.x2), min(self.y1, self.y2))
+                top_right = (max(self.x1, self.x2), min(self.y1, self.y2))
+                bottom_left = (min(self.x1,self.x2), max(self.y1, self.y2))
+                bottom_right = (max(self.x1,self.x2), max(self.y1, self.y2))
+                
+                color = (255, 255, 0)
+                
+                pygame.draw.line(self.screen, color, top_left, top_right, 2) # left
+                pygame.draw.line(self.screen, color, top_left, bottom_left, 2) # bottom
+                pygame.draw.line(self.screen, color, top_right, bottom_right, 2) # right
+                pygame.draw.line(self.screen, color, bottom_left, bottom_right, 2) # top
+             
             # if len(tx_camera) > 0: # frame buffer contains tx info
             #     self.screen.blit(self.screen_font.render("TX: {}".format(tx_camera), 1, (255, 0, 0)), (0, 0))
-
+             
             pygame.display.flip() # update screen
 
-            self.do_pygame_events()
+        self.do_pygame_events()
+
+         
+            
+        # pygame.draw.rect(screen, (255,0,0), rectangle)
+             
+            # pygame.draw.rect(screen, (255,255,255), pygame.rect.Rect(min(x1,x2), min(y1,y2), abs(x1-x2), abs(y1-y2)))
+        
         
         self.root.after(1, self.update)
+        t2 = time() - self.t0
+        self.frame_rate = 1/(t2-self.t)
         pass
 
     def update_gui(self):
@@ -541,9 +585,11 @@ class CS3D:
 
             # [2] - tracking information (passthrough from camera)
             tracking_information = values[2].split('&')
-            if len(tracking_information) < 7:
+            # print(tracking_information)
+            if len(tracking_information) < 8:
                 return 0
             
+        
             self.tracking_t = int(tracking_information[0])
             self.tracking_well = int(tracking_information[1])
             self.tracking_motor_homed = bool(int(tracking_information[2]))
@@ -551,8 +597,8 @@ class CS3D:
             self.tracking_stretch = float(tracking_information[4])
             self.tracking_found_max = bool(int(tracking_information[5]))
             self.tracking_maxes = json.loads(tracking_information[6])
-
-
+            self.magic = tracking_information[7]
+            # print(tracking_information)
             # [3-7] - motor information
             motor_information = values[3:7]
             # print(motor_information)
@@ -561,6 +607,7 @@ class CS3D:
                 if len(info.split('&')) < 9:
                     return 0
                 ID, motor_time, position, distance, frequency, passive_len, homed, camera_initialized, enabled, home_stage = tuple(info.split('&'))
+                # print(info.split('&'))
                 self.motors[motor].update_motor(
                     t=int(motor_time), 
                     p=int(position), 
@@ -572,7 +619,6 @@ class CS3D:
                     homing_stage=int(home_stage))
                 
             if (time() - self.t_display) > 0.050:
-                self.motors[self.well_motor].display()
                 self.t_display = time()
                 # print("t={}, well={}, homed={}, handshake={}, stretch={}, foundmax={}, maxes={}".format(
                 #     self.tracking_t, 
@@ -590,6 +636,7 @@ class CS3D:
                 return 0
             
             camera_row, camera_enable, camera_position, camera_well, got_stretch, algorithm_magnet_flag, comm_time = tuple(stage_information)
+            # print(stage_information)
             try: self.camera_row = int(camera_row)
             except ValueError: self.camera_row = camera_row
 
@@ -599,7 +646,10 @@ class CS3D:
             self.got_stretch   = bool(int(got_stretch))
             self.algorithm_magnet_flag = bool(int(algorithm_magnet_flag))
             self.comm_time             = int(comm_time)
-            printfunc(self.comm_time)
+
+
+            # self.motors[self.well_motor].display()
+            # printfunc("{}: {}".format(t, self.comm_time))
             # print("{}, {}, {}, {}, {}".format(temp, t, tracking_information, motor_information, stage_information))
             # temp, t, camera_information, motor_information[0], motor_information[1], motor_information[2], motor_information[3], stage_information  = tuple(string.split(';'))
         
@@ -637,11 +687,32 @@ class CS3D:
             self.root.after(1)
         printfunc('Stopping all motors.')
     def initialize_camera(self):
-        string = 'INIT\n'
+        if self.motors[self.well_motor].initialized == False:
+            string = 'INIT\n'
+            printfunc('Initializing camera.')
+            self.configure_button(self.button_initialize_camera, 'Unitialize Camera')
+        else:
+            string = "OMV,{}&DEINIT\n".format(self.well_motor)
+            printfunc('Uninitializing camera.')
+            self.configure_button(self.button_initialize_camera, 'Initialize Camera')
         self.write_to_motors(string)
-        printfunc('Initializing camera.')
-    def deinitialize_camera(self):
-        string = "OMV,{}&DEINIT\n".format(self.well_motor)
+    def toggle_video_recording(self):
+        self.running_processing = not self.running_processing
+        self.save_image_as_video = not self.save_image_as_video
+        string = "OMV,{}&REMOVEPROCESSING\n".format(self.well_motor)
+        if self.save_image_as_video:
+            self.configure_button(self.button_record_video, 'Recording', borderwidth=5)
+            self.videowriter = cv2.VideoWriter('{}_videocapture_{}.avi'.format(self.well_labels[self.well_motor], datetime.today().strftime("%Y%m%d_%H%M%S")), 
+                         cv2.VideoWriter_fourcc(*'MJPG'),
+                         self.frame_rate, self.image_size)
+        else:
+            self.configure_button(self.button_record_video, 'Record\nVideo', borderwidth=2)
+            if self.videowriter is not None:
+                try:    self.videowriter.release()
+                except: pass
+                self.videowriter = None
+            
+
         self.write_to_motors(string)
     def home_motor(self):
         string = "MOTORINIT&{}\n".format(self.well_motor)
@@ -653,15 +724,38 @@ class CS3D:
 
     def do_pygame_events(self):
         for event in pygame.event.get():
+            # print(event)
             if event.type == pygame.QUIT:
                 self.destroy()
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
-                    self.post_manual = event.pos
-                    self.write_to_motors("POSTMANUAL{},{}\n".format(self.post_manual[0], self.post_manual[1]))
+                    if not self.motors[self.well_motor].enabled:
+                        self.post_manual = event.pos
+                        self.write_to_motors("POSTMANUAL{},{}\n".format(self.post_manual[0], self.post_manual[1]))
+
+                if event.button == 3:
+                    if event.button == 3:
+                        self.make_a_rect = True
+                        if self.rect_making == False:
+                            self.x1, self.y1 = event.pos
+                            self.x2, self.y2 = event.pos
+                            self.rect_making = True
+                    
+            elif event.type == pygame.MOUSEBUTTONUP:
+                if event.button == 3:
+                    self.rect_making = False
+                    self.make_a_rect = False
+                    if self.x1 != self.x2 and self.y1 != self.y2:
+                        self.write_to_motors("OMV,{}&ROI&{}&{}&{}&{}#\n".format(self.camera_well, min(self.x1, self.x2), max(self.x1, self.x2), min(self.y1, self.y2), max(self.y1, self.y2)))
+                    
+
+            elif event.type == pygame.MOUSEMOTION:
+                if self.rect_making:
+                    self.x2, self.y2 = event.pos
+            
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_c: # C
-                    pygame.image.save(self.image, "{}_capture_{}.png".format(datetime.today().strftime("%Y%m%d_%H%M%S"), self.well_labels[self.well_motor]))
+                    pygame.image.save(self.image, "{}_capture_{}.png".format(self.well_labels[self.well_motor], datetime.today().strftime("%Y%m%d_%H%M%S")))
             
 
     def write_to_motors(self, string):
@@ -676,13 +770,19 @@ class CS3D:
             self.gotImage = True
             frame = frame_buffer[2]
             size = (frame_buffer[0], frame_buffer[1])
+            self.image_size = size
             # create image from RGB888
+            if self.screen_size != self.image_size:
+                pygame.display.set_mode((self.image_size))
+                self.screen_size = self.image_size
             image = pygame.image.frombuffer(frame.flat[0:], size, 'RGB')
-
+            if self.videowriter is not None:
+                self.videowriter.write(frame)
+                
             # blit stuff
             self.screen.blit(image, (0, 0))
-            self.screen.blit(self.bottom_screen_font.render("C{},{}".format(self.camera_well, self.camera_position),1 , (255, 0, 0)), (20, 450))
-            self.screen.blit(self.bottom_screen_font.render("D{},{}".format(self.well_motor, self.motors[self.well_motor].d), 1, (0,255,0)), (20,460))
+            self.screen.blit(self.bottom_screen_font.render("C{},{}".format(self.camera_well, self.camera_position),1 , (255, 0, 0)), (20, self.screen_size[1]-30))
+            self.screen.blit(self.bottom_screen_font.render("D{},{}".format(self.well_motor, self.motors[self.well_motor].d), 1, (0,255,0)), (20,self.screen_size[1]-20))
             # self.screen.blit(self.font.render("FPS %.2f"%(fps), 1, (255, 0, 0)), (0, 0))            
             return image
         else:
@@ -691,7 +791,8 @@ class CS3D:
     def get_motor_tx(self):
         if self.ports.connected_to_motors:
             string = self.conn.readline().decode('utf-8')[:-2]
-            self.conn.flushInput()
+            self.conn.reset_input_buffer()
+
         else:
             string = None
         return string

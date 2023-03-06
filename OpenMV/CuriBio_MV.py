@@ -188,7 +188,8 @@ class MaxTracker:
             # Found a lower min
             self.last_min = v
             self.last_tmin = t
-
+            
+        #print("{}, {}, {}, {}, {}".format(v, self.last_max, self.hysteresis, self.update_max, self.direction))
         if self.update_max and v < (self.last_max - self.hysteresis) and t > self.last_tmin + self.min_dt:
             # Update hysteresis dynamically (but slowly)
             # if len(self.maxes) > 0:
@@ -283,7 +284,7 @@ class PostAndMagnetTracker:
         :param roi is a 4 element tuple (xmin,xmax,ymin,ymax)
         """
         frames_to_plot = 200
-        n_hysteresis = 50
+        n_hysteresis = 10
         self.maxTracker = MaxTracker(frames_to_plot, CircularBufferSize, n_hysteresis)
         self.CircularBufferSize = CircularBufferSize
         self.n_hysteresis = n_hysteresis
@@ -341,6 +342,15 @@ class PostAndMagnetTracker:
 
 
     # This should be private
+    def set_passive_length(self, centroids):
+        centroid_p = np.array(centroids['passive_post_centroid'])
+        centroid_m = np.array(centroids['magnet_centroid'])
+        dx = centroid_m[0] - centroid_p[0]
+        dy = centroid_m[1] - centroid_p[1]
+
+        self.dist_neutral = np.linalg.norm(centroid_m - centroid_p)
+        return self.dist_neutral
+        
     def initPassive(self, stats_m, stats_p, postManualFlag=True, postManual=(57,237), post_tracking_parameters=None):
         if post_tracking_parameters is not None:
             postManualFlag  = post_tracking_parameters['manual_flag']
@@ -479,13 +489,14 @@ class PostAndMagnetTracker:
             # Determine title
             title = "Row {}".format(well_row)
             title += " / {} s".format(round(self.tic/1000,1))
-            title += "\nStretch: %4.2f%%" % stretch[-1]
+            title += " / FPS = {:>3.1f}".format(self.fps)
+            title += "\nStretch: {:>4.2f}%".format(stretch[-1])
             if len(max_stretch) == 0:
                 title += " / Max Stretch: []"
-                title += " / Thresh: {} ".format(tracking_parameters['threshold'])
+                # title += " / Thresh: {} ".format(tracking_parameters['threshold'])
             else:
                 title += " / Max Stretch: %4.1f%%" % max_stretch[-1]
-                title += " / Thresh: {} ".format(tracking_parameters['threshold'])
+                # title += " / Thresh: {} ".format(tracking_parameters['threshold'])
 
                 title += " \nMax Stretch: {}".format(self.maxTracker.countMaxes)
 
@@ -553,10 +564,16 @@ def getAspectRatio(d):
 
 
 def get_parameters_from_stats(stats_m):
-    area        = stats_m.pixels()
-    centroid_m  = stats_m.cx(), stats_m.cy()
-    extent      = round(stats_m.extent(),2)
-    aspectratio = round(float(stats_m.w()) / float(stats_m.h()),2)
+    if type(stats_m) == type(Centroid((0,0))):
+        area = 3000
+        centroid_m = int(stats_m.cx()), int(stats_m.cy())
+        extent = 0.6
+        aspectratio = 1.2
+    else:
+        area        = stats_m.pixels()
+        centroid_m  = stats_m.cx(), stats_m.cy()
+        extent      = round(stats_m.extent(),2)
+        aspectratio = round(float(stats_m.w()) / float(stats_m.h()),2)
 
     return area, extent, aspectratio, centroid_m
 
@@ -659,6 +676,7 @@ def determineThresholdDuringTracking(img, threshold=None, extent=None, aspectrat
 
 def visualizeDetermineThresholds(img, stats, tracking_parameters):
     roi = tracking_parameters['roi']
+    print(tracking_parameters)
     img.draw_rectangle(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2], 155, 3, False)
     for stat in stats:
         img.draw_circle(stat.cx(), stat.cy(), 4,[0,0,255], 1, True)
@@ -742,6 +760,9 @@ def locate_magnet(img, thresh_range=None, area_range=None, roi=None, aspectratio
     #print("{}, {}, {}, {}, {}".format(thresh_range, area_range, extent, aspectratio, roi))
     #print(thresh_range)
     #print(area_range)
+    #print(thresh_range)
+    #print(area_range)
+    #print(roi)
     stats_m = img.find_blobs( [thresh_range], pixels_threshold=area_range[0], roi=(roi[0], roi[2], roi[1]-roi[0], roi[3]-roi[2]))
 
     if len(stats_m) > 0:

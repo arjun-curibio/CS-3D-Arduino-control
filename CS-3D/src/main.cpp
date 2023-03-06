@@ -9,6 +9,9 @@
 #define PFD 7
 #define SLP 9
 #define RST 8
+#define MOTORFLIP LOW // whether or not the motors are inverted direction (used in AccelStepper)
+#define MOTORRESOLUTION 2/5 // depending on motor
+#define MAX_MOTOR_POSITION 5000 // absolute maximum of motor position, in steps (according to 15000 series, Model Z)
 
 // CAMERA STAGE DEFINITIONS
 #define STEPCAMERA 19
@@ -36,7 +39,7 @@ const int EN[4]   = { 6,  5,  4,  3}; // EN PIN
 // MOTOR VARIABLES
 float                freqs[4] = { 1,  1,  1,  1};
 uint32_t            period[4] = { 0,  0,  0,  0};
-long                 dists[4] = {  100,   100,   100,   100}; // [motor steps]
+long                 dists[4] = {  20,   20,   20,   20}; // [motor steps]
 int MotorStartingPositions[4] = { 500,  500,  500,  500};
 
 // MOTOR WAVEFORM VARIABLES
@@ -72,10 +75,10 @@ int MotorInitWell = 0;
 // CAMERA VARIABLES
 int     CameraUnderWell         = 0; // WHICH WELL THE CAMERA IS UNDER
 boolean MovingCamera            = LOW; // WHETHER OR NOT THE CAMERA IS MOVING
-int     CameraSpeed             = 1250; // SPEED OF CAMERA MOTOR (steps/s)
-int     CameraAcceleration      = 1250; // ACCELERATION OF CAMERA MOTOR (steps/s^2)
+int     CameraSpeed             = 2000; // SPEED OF CAMERA MOTOR (steps/s)
+int     CameraAcceleration      = 10000; // ACCELERATION OF CAMERA MOTOR (steps/s^2)
 int     CameraResetPosition     = 13000; // WALL POSITION FOR CAMERA RESET (steps)
-int     CameraResetSpeed        = 750; // SPEED OF CAMERA RESET (steps/s)
+int     CameraResetSpeed        = 1000; // SPEED OF CAMERA RESET (steps/s)
 int     CameraResetAcceleration = 500; // ACCELERATION OF CAMERA RESET (steps/s^2)
 int     CameraStartingPosition  = 700; // POSITION AWAY FROM WALL (steps)
 int     CameraPosition          = 0; // CURRENT POSITION OF CAMERA (steps)
@@ -90,6 +93,7 @@ boolean bringUp = LOW;
 elapsedMicros timers[4];
 elapsedMicros timerSerial;
 elapsedMicros timer_comm;
+boolean updateComm = LOW;
 // COMMUNICATION VARIABLES
 String command;
 String printstring;
@@ -102,7 +106,7 @@ float stretchValue = 0.;
 float frequencyValue = 0.;
 int32_t t_camera = 0;
 int last_max_stretch = 0;
-int passive_len[4] = {100, 100, 100, 100};
+int passive_len[4]      = {100,       100,      100,      100};
 int mag_thresh[4][2]    = {{20, 40}, {20, 40}, {20, 40}, {20, 40}};
 int post_thresh[4][2]   = {{0, 15},  {0, 15},  {0, 15},  {0, 15}};
 int post_centroid[4][2] = {{0, 0},   {0, 0},   {0, 0},   {0, 0}};
@@ -124,6 +128,7 @@ AccelStepper *stArray[4];
 AccelStepper stCamera(1, STEPCAMERA, DIRCAMERA);
 
 int comm_time = 0;
+int magic = -22;
 int checkPhase(elapsedMicros t, uint32_t ts[]) {
   int inPhase = 4;
 
@@ -208,7 +213,7 @@ void MotorManual(int MOTOR, int m) { // MANUAL OVERRIDE OF MOTOR POSITION
   manualOverride[MOTOR] = HIGH;
   enableState[MOTOR] = LOW;
   stArray[MOTOR]->moveTo(m);
-  stArray[MOTOR]->setMaxSpeed(5000);
+  stArray[MOTOR]->setMaxSpeed(5000*MOTORRESOLUTION);
   if (stArray[MOTOR]->distanceToGo() == 0) {
     enableState[MOTOR] = HIGH;
   }
@@ -250,11 +255,11 @@ void MotorAdjust(int MOTOR, int ADJ) { // ADJUST POSITION OF MOTOR
   switch (ADJ) {
     case 0:
       stArray[MOTOR]->moveTo(cp - 4);
-      stArray[MOTOR]->setMaxSpeed(1000);
+      stArray[MOTOR]->setMaxSpeed(1000*MOTORRESOLUTION);
       break;
     case 1:
       stArray[MOTOR]->moveTo(cp + 4);
-      stArray[MOTOR]->setMaxSpeed(1000);
+      stArray[MOTOR]->setMaxSpeed(1000*MOTORRESOLUTION);
       break;
   }
 }
@@ -263,8 +268,8 @@ void MotorRetract(int MOTOR) { // RETRACT MOTOR POSITION TO ZERO
   enableState[MOTOR] = LOW;
   motorInitState[MOTOR] = -1; // reset motorInitState flag to -1 (not initialized)
   motorRetractFlag[MOTOR] = HIGH;
-  stArray[MOTOR]->setMaxSpeed(5000);
-  stArray[MOTOR]->moveTo(-5000);
+  stArray[MOTOR]->setMaxSpeed(5000*MOTORRESOLUTION);
+  stArray[MOTOR]->moveTo(-1*MAX_MOTOR_POSITION);
 }
 void CameraMove(int CameraPosition) {
   //  enableStateCamera = HIGH;
@@ -302,8 +307,8 @@ void CameraAdjust(int CameraWell, int CameraPosition) {
 void(* resetFunc) (void) = 0; //declare reset function @ address 0
 
 void setup() {
+  // while (!Serial) { }
   // put your setup code here, to run once:
-
   // GLOBAL MOTOR VARIABLE SET-UP
   pinMode(MS1, OUTPUT); digitalWrite(MS1, MS1Val);
   pinMode(MS2, OUTPUT); digitalWrite(MS2, MS2Val);
@@ -322,9 +327,9 @@ void setup() {
     pinMode(EN[st], OUTPUT); digitalWrite(EN[st], enableState[st]);
 
     stArray[st] = new AccelStepper(1, STEP[st], DIR[st]);
-    stArray[st]->setMaxSpeed(10000);
-    stArray[st]->setAcceleration(100000);
-    stArray[st]->setPinsInverted(LOW);
+    stArray[st]->setMaxSpeed(10000*MOTORRESOLUTION);
+    stArray[st]->setAcceleration(100000*MOTORRESOLUTION);
+    stArray[st]->setPinsInverted(MOTORFLIP);
 
     period[st] = 1e6 / freqs[st];
     for (int ph = 0; ph < 5; ph++) {
@@ -406,11 +411,11 @@ String partialReturn(char del) {
 
 void loop() {
   // COMMUNICATION UPDATE
-  timer_comm = 0;
+  
   if (Serial.available() > 0) { // FROM COMPUTER
     command = Serial.readString();
     Serial.println(command);
-    Serial.flush();
+    // Serial.flush();
     if (command.substring(0, 8) == "RESETALL") {
       OMV.println("RESET"); // Reset OpenMV
       resetFunc(); // reset Arduino
@@ -711,21 +716,23 @@ void loop() {
     }
   }
 
-
   if (OMV.available() > 0) { // FROM OPENMV
+    timer_comm = 0;
+    updateComm = HIGH;
     String mv = OMV.readStringUntil('\n');
+    // Serial.print(mv);
     // Serial.println(mv);
-    int magic = -22; // initialize to -22 (not used)
+    magic = -22; // initialize to -22 (not used)
     if (mv != "") {
-      OMV.flush();
+      // OMV.flush();
       int index = mv.indexOf('#', 0); // find first #
       magic = mv.substring(0, index).toInt(); // store first substring as magic number
       mv = mv.substring(index + 1); // remove magic number
     }
     if (magic == -47) {
       CameraInited[CameraUnderWell] = LOW;
-      MotorInited[CameraUnderWell] = LOW;
-      enableState[CameraUnderWell] = HIGH;
+      // MotorInited[CameraUnderWell] = LOW;
+      // enableState[CameraUnderWell] = HIGH;
     }
     if (magic == -35) { // <t>#<stretch>#<foundMax>#<max_stretch>\n
       gotStretchFlag = HIGH;
@@ -832,10 +839,11 @@ void loop() {
       }
 
     }
+    comm_time = timer_comm;
+
   }
 
-  comm_time = timer_comm;
-  
+
   // MOTOR UPDATE
   for (int st = 0; st < 4; st++) {
     // enableState[st] = LOW;
@@ -865,9 +873,9 @@ void loop() {
       */
       // MotorInited[st] = HIGH;
       if (motorRetractFlag[st] == HIGH) { // EMERGENCY RETRACT
-        stArray[st]->moveTo(-2000); // MOVE ARBITRARILY BACK
-        stArray[st]->setMaxSpeed(5000); // SET HIGH SPEED
-        stArray[st]->setAcceleration(10000); // SET HIGH ACCELERATION
+        stArray[st]->moveTo(-2000*MOTORRESOLUTION); // MOVE ARBITRARILY BACK
+        stArray[st]->setMaxSpeed(5000*MOTORRESOLUTION); // SET HIGH SPEED
+        stArray[st]->setAcceleration(10000*MOTORRESOLUTION); // SET HIGH ACCELERATION
         stArray[st]->run();
         if (stArray[st]->distanceToGo() == 0) { 
           motorRetractFlag[st] = LOW; 
@@ -890,9 +898,9 @@ void loop() {
             }
             break;
           case 2:
-            stArray[st]->setMaxSpeed(3000);
-            stArray[st]->setAcceleration(2000);
-            stArray[st]->moveTo(-5000);
+            stArray[st]->setMaxSpeed(3000*MOTORRESOLUTION);
+            stArray[st]->setAcceleration(2000*MOTORRESOLUTION);
+            stArray[st]->moveTo(-5000*MOTORRESOLUTION);
             stArray[st]->run();
             
             
@@ -900,16 +908,14 @@ void loop() {
               motorInitState[st] = 3; // Continue onto next phase
               stArray[st]->setCurrentPosition(0);
               // CameraInited[st] = LOW; // Force low
-              OMV.print(st);
-              OMV.println("&INIT#"); // RE-INITIALIZE CAMERA
               // OMV.print(st);
               // OMV.println("&MOTORINIT&HOME#");
               }
             break;
           case 3: // Bring down 3000 steps, fast
-            stArray[st]->moveTo(3000);
-            stArray[st]->setMaxSpeed(1000); // Fast speed
-            stArray[st]->setAcceleration(3000); // Fast acceleration
+            stArray[st]->moveTo(3000*MOTORRESOLUTION);
+            stArray[st]->setMaxSpeed(1000*MOTORRESOLUTION); // Fast speed
+            stArray[st]->setAcceleration(3000*MOTORRESOLUTION); // Fast acceleration
             stArray[st]->run();
             if (stretchValue > 2 && gotStretchFlag==HIGH) { // as bring down, check for stretch value return
               stArray[st]->setCurrentPosition(0); // set current position to 0 (for relative position)
@@ -920,17 +926,24 @@ void loop() {
             if (stArray[st]->distanceToGo() == 0) { // if reached 3000 steps, still continue down, but slower
               motorInitState[st] = 4;
               stArray[st]->setCurrentPosition(0);
-
+              OMV.print(st);
+              OMV.println("&INIT#"); // RE-INITIALIZE CAMERA
+              waitForCameraInit = HIGH;
             }
             break;
-          case 4: // Bring down arbitrarily, monitor for stretch
-            stArray[st]->moveTo(750); // Arbitrarily down
-            stArray[st]->setMaxSpeed(50); // Slow speed
-            stArray[st]->setAcceleration(50); // Matching acceleration
+          case 4:
+            if (waitForCameraInit == LOW) {
+              motorInitState[st] = 5;
+              waitForCameraInit = HIGH;
+            }
+          case 5: // Bring down arbitrarily, monitor for stretch
+            stArray[st]->moveTo(750*MOTORRESOLUTION); // Arbitrarily down
+            stArray[st]->setMaxSpeed(50*MOTORRESOLUTION); // Slow speed
+            stArray[st]->setAcceleration(50*MOTORRESOLUTION); // Matching acceleration
             stArray[st]->run();
             if (stretchValue > 2 && gotStretchFlag==HIGH) { // as bring down, check for stretch value return
               stArray[st]->setCurrentPosition(0); // set current position to 0 (for relative position)
-              motorInitState[st] = 5; // Continue onto next phase
+              motorInitState[st] = 6; // Continue onto next phase
               OMV.print(st);
               OMV.println("&MOTORINIT&HOME#");
             }
@@ -942,17 +955,17 @@ void loop() {
             }
             
             break;
-          case 5: // Bring up 200 steps (somewhat arbitrary), monitor for lack of stretch
-            stArray[st]->setMaxSpeed(25); // slow
-            stArray[st]->setAcceleration(25); // matching acceleration
-            stArray[st]->moveTo(-200); // stop at -200 (in case of error)
+          case 6: // Bring up 200 steps (somewhat arbitrary), monitor for lack of stretch
+            stArray[st]->setMaxSpeed(25*MOTORRESOLUTION); // slow
+            stArray[st]->setAcceleration(25*MOTORRESOLUTION); // matching acceleration
+            stArray[st]->moveTo(-200*MOTORRESOLUTION); // stop at -200 (in case of error)
             stArray[st]->run();
             
             if (gotStretchFlag == HIGH && stretchValue < 0.5) {
               enableState[st] = HIGH; // DISABLE MOTOR
               MotorInited[st] = HIGH; // MOTOR INITIALIZED
               MotorResetPosition(st);
-              stArray[st]->setAcceleration(100000);
+              stArray[st]->setAcceleration(100000*MOTORRESOLUTION);
               motorInitState[st] = -1;
               OMV.print(st);
               OMV.println("&MOTORINIT&PASS#");
@@ -961,7 +974,7 @@ void loop() {
               MotorInited[st] = LOW;
               enableState[st] = HIGH;
               MotorResetPosition(st);
-              stArray[st]->setAcceleration(100000);
+              stArray[st]->setAcceleration(100000*MOTORRESOLUTION);
               motorInitState[st] = 0;
               OMV.print(st);
               OMV.println("&MOTORINIT&FAIL#");
@@ -974,7 +987,7 @@ void loop() {
       }
 
       else if (resetFlag[st] == HIGH) { // MOTOR RESET
-        stArray[st]->setMaxSpeed(1000); // quick
+        stArray[st]->setMaxSpeed(1000*MOTORRESOLUTION); // quick
         stArray[st]->moveTo(0); // move back to 0 position
         stArray[st]->run();
         if (stArray[st]->distanceToGo() == 0) { // when reached final destination
@@ -1028,9 +1041,9 @@ void loop() {
 
   gotStretchFlag = LOW;
   // TIMER UPDATE
-  if (timerSerial > 25 * 1000) {
+  if (timerSerial > 5 * 1000) {
     if (HELPERFLAG == HIGH) {
-      Serial.flush();
+      // Serial.flush();
       Serial.print("HELPER");
       for (int idx = 0; idx < k; idx++) {
 
@@ -1042,7 +1055,7 @@ void loop() {
 
     }
     else {
-      Serial.flush();
+      // Serial.flush();
       Serial.print("-33;");
       Serial.print(millis()); // Arduino Time
       Serial.print(';');
@@ -1059,6 +1072,9 @@ void loop() {
       Serial.print(foundMax);
       Serial.print('&');
       Serial.print(maxs);
+      Serial.print('&');
+      Serial.print(magic);
+      
       Serial.print(';');
       
 
@@ -1105,8 +1121,9 @@ void loop() {
       Serial.print(gotStretchFlag);
       Serial.print('&');
       Serial.print(algorithm_magnet_flag);
-      Serial.print('&');
-      Serial.print(timer_comm);
+      Serial.print('&');  
+      
+      Serial.print(comm_time);
       Serial.println(' ');
       timerSerial = 0;
     }
