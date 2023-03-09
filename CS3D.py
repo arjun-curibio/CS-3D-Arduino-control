@@ -121,12 +121,13 @@ class CS3D:
         
         self.camera_row = 'D'
         self.camera_enable = False
-        self.camera_position = 0
+        self.camera_positioSn = 0
         self.camera_well = 0
         self.running_processing = True
         self.save_image_as_video = False
         self.videowriter = None
-
+        self.time_of_recording = ''
+        self.image_size = (640,480)
         self.got_stretch   = False
         self.algorithm_magnet_flag = False
 
@@ -135,6 +136,7 @@ class CS3D:
         self.make_a_rect = False
 
         self.frame_rate = 30
+        self.tracking_t = 0
         # self.waveform_root.protocol("MW_DELETE_WINDOW", self.waveform_window_close)
 
         # CONFIGURE WAVEFORM DIALOG
@@ -550,7 +552,8 @@ class CS3D:
         
         self.root.after(1, self.update)
         t2 = time() - self.t0
-        self.frame_rate = 1/(t2-self.t)
+        if t2 > self.t:
+            self.frame_rate = 1/(t2-self.t)
         pass
 
     def update_gui(self):
@@ -690,11 +693,11 @@ class CS3D:
         if self.motors[self.well_motor].initialized == False:
             string = 'INIT\n'
             printfunc('Initializing camera.')
-            self.configure_button(self.button_initialize_camera, 'Unitialize Camera')
+            self.configure_button(self.button_initialize_camera, 'Reset\nCamera')
         else:
             string = "OMV,{}&DEINIT\n".format(self.well_motor)
             printfunc('Uninitializing camera.')
-            self.configure_button(self.button_initialize_camera, 'Initialize Camera')
+            self.configure_button(self.button_initialize_camera, 'Initialize\nCamera')
         self.write_to_motors(string)
     def toggle_video_recording(self):
         self.running_processing = not self.running_processing
@@ -702,9 +705,14 @@ class CS3D:
         string = "OMV,{}&REMOVEPROCESSING\n".format(self.well_motor)
         if self.save_image_as_video:
             self.configure_button(self.button_record_video, 'Recording', borderwidth=5)
-            self.videowriter = cv2.VideoWriter('{}_videocapture_{}.avi'.format(self.well_labels[self.well_motor], datetime.today().strftime("%Y%m%d_%H%M%S")), 
+            self.time_of_recording = datetime.today().strftime("%Y%m%d_%H%M%S")
+            self.videowriter = cv2.VideoWriter('{}_videocapture_{}.avi'.format(self.well_labels[self.well_motor], self.time_of_recording), 
                          cv2.VideoWriter_fourcc(*'MJPG'),
                          self.frame_rate, self.image_size)
+            with open("{}_video_information_{}.txt".format(self.well_labels[self.well_motor], self.time_of_recording), 'w') as f:
+                f.write('t\twell\tp\td\t\n')
+            
+            
         else:
             self.configure_button(self.button_record_video, 'Record\nVideo', borderwidth=2)
             if self.videowriter is not None:
@@ -767,6 +775,7 @@ class CS3D:
     def get_frame_buffer(self):
         frame_buffer = pyopenmv.fb_dump()
         if frame_buffer != None:
+
             self.gotImage = True
             frame = frame_buffer[2]
             size = (frame_buffer[0], frame_buffer[1])
@@ -776,9 +785,13 @@ class CS3D:
                 pygame.display.set_mode((self.image_size))
                 self.screen_size = self.image_size
             image = pygame.image.frombuffer(frame.flat[0:], size, 'RGB')
+            print(self.videowriter)
             if self.videowriter is not None:
                 self.videowriter.write(frame)
-                
+                with open("{}_video_information_{}.txt".format(self.well_labels[self.well_motor], self.time_of_recording), 'a') as f:
+                    f.write('{}\t{}\t{}\t{}\t\n'.format(self.tracking_t, self.well_labels[self.well_motor], self.motors[self.well_motor].p, self.motors[self.well_motor].d))
+            
+            
             # blit stuff
             self.screen.blit(image, (0, 0))
             self.screen.blit(self.bottom_screen_font.render("C{},{}".format(self.camera_well, self.camera_position),1 , (255, 0, 0)), (20, self.screen_size[1]-30))
