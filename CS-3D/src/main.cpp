@@ -10,7 +10,7 @@
 #define SLP 9
 #define RST 8
 #define MOTORFLIP LOW // whether or not the motors are inverted direction (used in AccelStepper)
-#define MOTORRESOLUTION 2/5 // depending on motor
+#define MOTORRESOLUTION 1 // depending on motor (1 = motor resolution of 0.05mm full step distance)
 #define MAX_MOTOR_POSITION 5000 // absolute maximum of motor position, in steps (according to 15000 series, Model Z)
 
 // CAMERA STAGE DEFINITIONS
@@ -37,9 +37,9 @@ const int DIR[4]  = {18, 17, 16, 15}; // DIR PIN
 const int EN[4]   = { 6,  5,  4,  3}; // EN PIN
 
 // MOTOR VARIABLES
-float                freqs[4] = { 1,  1,  1,  1};
+float                freqs[4] = { 1.25,  1.25,  1.25,  1.25};
 uint32_t            period[4] = { 0,  0,  0,  0};
-long                 dists[4] = {  20,   20,   20,   20}; // [motor steps]
+long                 dists[4] = {  60,   60,   60,   60}; // [motor steps]
 int MotorStartingPositions[4] = { 500,  500,  500,  500};
 
 // MOTOR WAVEFORM VARIABLES

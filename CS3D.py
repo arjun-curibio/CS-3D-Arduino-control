@@ -38,7 +38,8 @@ class Motor:
         self.homing_stage = homing_stage
     
     def display(self):
-        printfunc('ID {}: t={}, p={}, d={}, f={}, enabled={}, homed={}, initialized={}, homing_stage={}'.format(self.ID, self.t, self.p, self.d, self.f, self.enabled, self.homed, self.initialized, self.homing_stage))
+        
+        printfunc('ID {}: t={}, p={}, d={}, f={}, enabled={}, homed={}, initialized={}, homing_stage={}                                 '.format(self.ID, self.t, self.p, self.d, self.f, self.enabled, self.homed, self.initialized, self.homing_stage), end='\r')
 
 
 class CS3D:
@@ -651,7 +652,7 @@ class CS3D:
             self.comm_time             = int(comm_time)
 
 
-            # self.motors[self.well_motor].display()
+            self.motors[self.well_motor].display()
             # printfunc("{}: {}".format(t, self.comm_time))
             # print("{}, {}, {}, {}, {}".format(temp, t, tracking_information, motor_information, stage_information))
             # temp, t, camera_information, motor_information[0], motor_information[1], motor_information[2], motor_information[3], stage_information  = tuple(string.split(';'))
@@ -785,7 +786,7 @@ class CS3D:
                 pygame.display.set_mode((self.image_size))
                 self.screen_size = self.image_size
             image = pygame.image.frombuffer(frame.flat[0:], size, 'RGB')
-            print(self.videowriter)
+            # print(self.videowriter)
             if self.videowriter is not None:
                 self.videowriter.write(frame)
                 with open("{}_video_information_{}.txt".format(self.well_labels[self.well_motor], self.time_of_recording), 'a') as f:
@@ -840,8 +841,8 @@ class CS3D:
 
 
 
-def printfunc(string):
-    print(string)
+def printfunc(string, **kwargs):
+    print(string, **kwargs)
 
 
 # ESTABLISH CONNECTIONS
