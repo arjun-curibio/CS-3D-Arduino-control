@@ -22,6 +22,11 @@
 // Serial definition (for readability)
 #define OMV Serial1
 
+#define TTL_in 28
+
+
+boolean TTL_MODE = LOW;
+
 // GLOBAL MOTOR CONSTANTS
 const int MS1Val = HIGH;
 const int MS2Val = HIGH;
@@ -44,26 +49,27 @@ int MotorStartingPositions[4] = { 500,  500,  500,  500};
 
 // MOTOR WAVEFORM VARIABLES
 uint32_t sections[5] =  {0,       40,       50,        90,      100};
-long locPhase[4][5] = {
-  {0, dists[0], dists[0],        0,         0},
-  {0, dists[1], dists[1],        0,         0},
-  {0, dists[2], dists[2],        0,         0},
-  {0, dists[3], dists[3],        0,         0}
+long locPhase[4][6] = {
+  {0, 0, dists[0], dists[0],        0,         0},
+  {0, 0, dists[1], dists[1],        0,         0},
+  {0, 0, dists[2], dists[2],        0,         0},
+  {0, 0, dists[3], dists[3],        0,         0}
 };
-float speedPhase[4][5] = {
-  {0,        0,        0,        0,         0},
-  {0,        0,        0,        0,         0},
-  {0,        0,        0,        0,         0},
-  {0,        0,        0,        0,         0}
+float speedPhase[4][6] = {
+  {0, 0,        0,        0,        0,         0},
+  {0, 0,        0,        0,        0,         0},
+  {0, 0,        0,        0,        0,         0},
+  {0, 0,        0,        0,        0,         0}
 };
-uint32_t ts[4][5];
-
+uint32_t ts[4][6];
+int n_cycles[4] = {-1, -1, -1, -1}; // default -1 for infinite
+int cycle_count[4] = {0, 0, 0, 0}; 
 // MOTOR FLAGS
 boolean resetFlag[4]          = { LOW,  LOW,  LOW,  LOW}; // MOTOR RESET POSITION FLAG
 boolean motorRetractFlag[4]   = { LOW,  LOW,  LOW,  LOW}; // RETRACT FLAG
 boolean manualOverride[4]     = { LOW,  LOW,  LOW,  LOW}; // MANUAL TAKEOVER FLAG
 boolean firstCycle[4]         = {HIGH, HIGH, HIGH, HIGH}; // WHETHER MOTOR IS IN THE FIRST CYCLE
-boolean enableState[4]        = { LOW,  LOW,  LOW,  LOW}; // MOTOR ENABLE/DISABLE FLAG (LOW TO ENABLE)
+boolean enableState[4]        = {HIGH, HIGH, HIGH, HIGH}; // MOTOR ENABLE/DISABLE FLAG (LOW TO ENABLE)
 int motorInitState[4]         = {   0,    0,    0,    0}; // INITIALIZE MOTOR POSITIONS FLAG
 boolean MotorInited[4]        = { LOW,  LOW,  LOW,  LOW}; // WHETHER MOTOR IS INITIALIZED
 boolean CameraInited[4]       = { LOW,  LOW,  LOW,  LOW}; // WHETHER CAMERA IS INITIALIZED
@@ -114,6 +120,9 @@ int post_centroid[4][2] = {{0, 0},   {0, 0},   {0, 0},   {0, 0}};
 const int LEDPIN = 28;
 int LEDVAL = 256; int LEDIN = 100;
 
+
+int TTL_received = LOW;
+
 boolean HELPERFLAG = LOW;
 String HELPERMASK = "None";
 int32_t valueArray[50];
@@ -130,22 +139,25 @@ AccelStepper stCamera(1, STEPCAMERA, DIRCAMERA);
 int comm_time = 0;
 int magic = -22;
 int checkPhase(elapsedMicros t, uint32_t ts[]) {
-  int inPhase = 4;
+  int inPhase = 5;
 
-  if      ( t >= ts[3]                ) {
-    inPhase = 4;  // REST
+  if      ( t >= ts[4]                ) {
+    inPhase = 5;  // REST
+  }
+  else if ((t >= ts[3]) && (t < ts[4])) {
+    inPhase = 4;  // FALL
   }
   else if ((t >= ts[2]) && (t < ts[3])) {
-    inPhase = 3;  // FALL
+    inPhase = 3;  // HOLD
   }
   else if ((t >= ts[1]) && (t < ts[2])) {
-    inPhase = 2;  // HOLD
+    inPhase = 2;  // RISE
   }
   else if ((t >= ts[0]) && (t < ts[1])) {
-    inPhase = 1;  // RISE
+    inPhase = 1; // DELAY
   }
   else {
-    inPhase = 4;  // DEFAULT TO REST
+    inPhase = 5;  // DEFAULT TO REST
   }
   return inPhase;
 }
@@ -153,6 +165,16 @@ int checkPhase(elapsedMicros t, uint32_t ts[]) {
 void establishConnection() {
 
 }
+
+void interruptTTL() {
+  TTL_received = HIGH;
+  if (TTL_MODE == HIGH) {
+    for (int st = 0; st < 4; st ++ ){ // reset all timers
+      timers[st] = 0;
+    }
+  }
+}
+
 void moveAllMotorsBLOCKING() { // BLOCKING MOTOR MOVEMENT
   int allDistanceToGo = 0;
   for (int st = 0; st < 4; st++ ) {
@@ -167,34 +189,42 @@ void moveAllMotorsBLOCKING() { // BLOCKING MOTOR MOVEMENT
   }
 }
 void MotorEnable(int MOTOR) { // ENABLE MOTOR
+  TTL_received = LOW; // clear any TTL  in waiting
+  // was off (high)
   enableState[MOTOR] = !enableState[MOTOR];
-  if      (enableState[MOTOR] == HIGH) {
-    resetFlag[MOTOR] = HIGH;
-    enableState[MOTOR] = LOW;
+  // now on (low)
+  cycle_count[MOTOR] = 0;
+
+  if      (enableState[MOTOR] == HIGH) { // if now off
+    resetFlag[MOTOR] = HIGH; // reset motor position 
+    enableState[MOTOR] = LOW; // enable motor for reset
   }
-  else if (enableState[MOTOR] == LOW)  {
-    manualOverride[MOTOR] = LOW;
-    timers[MOTOR] = 0;
+  else if (enableState[MOTOR] == LOW)  { // if now on
+    manualOverride[MOTOR] = LOW; // disable manual override
+    timers[MOTOR] = 0; // bring timer back to 0
+
   }
 }
+
 void MotorDistance(int MOTOR, float d) { // CHANGE DISTANCE OF CYCLING
   dists[MOTOR] = d;
-  for (int ph = 1; ph < 3; ph++) {
+  for (int ph = 2; ph < 4; ph++) {
     locPhase[MOTOR][ph] = dists[MOTOR];
   }
-  for (int ph = 0; ph < 4; ph++) {
+  for (int ph = 1; ph < 5; ph++) {
     speedPhase[MOTOR][ph] = (locPhase[MOTOR][ph + 1] - locPhase[MOTOR][ph]) / ( (ts[MOTOR][ph + 1] - ts[MOTOR][ph]) / 1e6 );
     if (isnan(speedPhase[MOTOR][ph])) {
       speedPhase[MOTOR][ph] = 0;
     }
   }
 }
+
 void MotorFrequency(int MOTOR, float f) { // CHANGE FREQUENCY OF CYCLING
   freqs[MOTOR] = f;
   period[MOTOR] = 1e6 / f;
   // Serial.println(period[MOTOR]);
-  for (int ph = 0; ph < 5; ph++) {
-    if   (ph == 4)  {
+  for (int ph = 1; ph < 6; ph++) {
+    if   (ph == 5)  {
       ts[MOTOR][ph] = period[MOTOR];
     }
     else            {
@@ -202,13 +232,14 @@ void MotorFrequency(int MOTOR, float f) { // CHANGE FREQUENCY OF CYCLING
     }
   }
 
-  for (int ph = 0; ph < 4; ph++) {
+  for (int ph = 1; ph < 5; ph++) {
     speedPhase[MOTOR][ph] = (locPhase[MOTOR][ph + 1] - locPhase[MOTOR][ph]) / ( (ts[MOTOR][ph + 1] - ts[MOTOR][ph]) / 1e6 );
     if (isnan(speedPhase[MOTOR][ph])) {
       speedPhase[MOTOR][ph] = 0;
     }
   }
 }
+
 void MotorManual(int MOTOR, int m) { // MANUAL OVERRIDE OF MOTOR POSITION
   manualOverride[MOTOR] = HIGH;
   enableState[MOTOR] = LOW;
@@ -232,15 +263,15 @@ void WaveformUpdate(int MOTOR, uint32_t RIS, uint32_t HOL, uint32_t FAL) { // CH
     enableState[MOTOR] = LOW;
     resetFlag[MOTOR] = HIGH;
     timers[MOTOR] = 0;
-    for (int ph = 0; ph < 5; ph++) {
-      if   (ph == 4)  {
+    for (int ph = 1; ph < 6; ph++) {
+      if   (ph == 5)  {
         ts[MOTOR][ph] = period[MOTOR];
       }
       else            {
         ts[MOTOR][ph] = sections[ph] * period[MOTOR] / 100;
       }
     }
-    for (int ph = 0; ph < 4; ph++) {
+    for (int ph = 1; ph < 5; ph++) {
       speedPhase[MOTOR][ph] = (locPhase[MOTOR][ph + 1] - locPhase[MOTOR][ph]) / ( (ts[MOTOR][ph + 1] - ts[MOTOR][ph]) / 1e6 );
       if (isnan(speedPhase[MOTOR][ph])) {
         speedPhase[MOTOR][ph] = 0;
@@ -304,6 +335,138 @@ void StartingPositions(int MOTOR, int action) {
 void CameraAdjust(int CameraWell, int CameraPosition) {
 
 }
+
+void executeMotorRetraction(int MOTOR) {
+  stArray[MOTOR]->moveTo(-2000*MOTORRESOLUTION); // MOVE ARBITRARILY BACK
+  stArray[MOTOR]->setMaxSpeed(5000*MOTORRESOLUTION); // SET HIGH SPEED
+  stArray[MOTOR]->setAcceleration(10000*MOTORRESOLUTION); // SET HIGH ACCELERATION
+  stArray[MOTOR]->run();
+  if (stArray[MOTOR]->distanceToGo() == 0) { 
+    motorRetractFlag[MOTOR] = LOW; 
+    MotorResetPosition(MOTOR);
+  }
+}
+
+void executeMotorInitialization(int st) {
+  switch (motorInitState[st]) {
+    case 0: // Somehow got through if-else condition
+      break;
+    case 1: // Bring up 500 steps, before initialization
+      if (CameraInited[st] == HIGH) {
+        OMV.print(st);
+        OMV.println("&MOTORINIT&HOME#");
+        motorInitState[st] = 2;
+      }
+      else {
+        motorInitState[st] = 0; // exit out of motor initialization immediately
+      }
+      break;
+    case 2:
+      stArray[st]->setMaxSpeed(3000*MOTORRESOLUTION);
+      stArray[st]->setAcceleration(2000*MOTORRESOLUTION);
+      stArray[st]->moveTo(-5000*MOTORRESOLUTION);
+      stArray[st]->run();
+      
+      
+      if (stArray[st]->distanceToGo() == 0) { 
+        motorInitState[st] = 3; // Continue onto next phase
+        stArray[st]->setCurrentPosition(0);
+        // CameraInited[st] = LOW; // Force low
+        // OMV.print(st);
+        // OMV.println("&MOTORINIT&HOME#");
+        }
+      break;
+    case 3: // Bring down 3000 steps, fast
+      stArray[st]->moveTo(3000*MOTORRESOLUTION);
+      stArray[st]->setMaxSpeed(1000*MOTORRESOLUTION); // Fast speed
+      stArray[st]->setAcceleration(3000*MOTORRESOLUTION); // Fast acceleration
+      stArray[st]->run();
+      if (stretchValue > 2 && gotStretchFlag==HIGH) { // as bring down, check for stretch value return
+        stArray[st]->setCurrentPosition(0); // set current position to 0 (for relative position)
+        motorInitState[st] = 5; // Continue onto next phase
+        OMV.print(st);
+        OMV.println("&MOTORINIT&HOME#");
+      }
+      if (stArray[st]->distanceToGo() == 0) { // if reached 3000 steps, still continue down, but slower
+        motorInitState[st] = 4;
+        stArray[st]->setCurrentPosition(0);
+        OMV.print(st);
+        OMV.println("&INIT#"); // RE-INITIALIZE CAMERA
+        waitForCameraInit = HIGH;
+      }
+      break;
+    case 4:
+      if (waitForCameraInit == LOW) {
+        motorInitState[st] = 5;
+        waitForCameraInit = HIGH;
+      }
+    case 5: // Bring down arbitrarily, monitor for stretch
+      stArray[st]->moveTo(1000*MOTORRESOLUTION); // Arbitrarily down
+      stArray[st]->setMaxSpeed(50*MOTORRESOLUTION); // Slow speed
+      stArray[st]->setAcceleration(50*MOTORRESOLUTION); // Matching acceleration
+      stArray[st]->run();
+      if (stretchValue > 1.5 && gotStretchFlag==HIGH) { // as bring down, check for stretch value return
+        stArray[st]->setCurrentPosition(0); // set current position to 0 (for relative position)
+        motorInitState[st] = 6; // Continue onto next phase
+        OMV.print(st);
+        OMV.println("&MOTORINIT&HOME#");
+      }
+      else if (stArray[st]->distanceToGo() == 0) { // If reached arbitrarily low destination (too far)
+        MotorRetract(st); // Retract Motor
+        motorInitState[st] = 0; // Stop Motor Initialization
+        OMV.print(st);
+        OMV.println("&MOTORINIT&FAIL#");
+      }
+      
+      break;
+    case 6: // Bring up 200 steps (somewhat arbitrary), monitor for lack of stretch
+      stArray[st]->setMaxSpeed(25*MOTORRESOLUTION); // slow
+      stArray[st]->setAcceleration(25*MOTORRESOLUTION); // matching acceleration
+      stArray[st]->moveTo(-200*MOTORRESOLUTION); // stop at -200 (in case of error)
+      stArray[st]->run();
+      
+      if (gotStretchFlag == HIGH && stretchValue < 0.5) {
+        enableState[st] = HIGH; // DISABLE MOTOR
+        MotorInited[st] = HIGH; // MOTOR INITIALIZED
+        MotorResetPosition(st);
+        stArray[st]->setAcceleration(100000*MOTORRESOLUTION);
+        motorInitState[st] = -1;
+        OMV.print(st);
+        OMV.println("&MOTORINIT&PASS#");
+      }
+      else if (stArray[st]->distanceToGo() == 0) { // FAILED MOTOR INIT
+        MotorInited[st] = LOW;
+        enableState[st] = HIGH;
+        MotorResetPosition(st);
+        stArray[st]->setAcceleration(100000*MOTORRESOLUTION);
+        motorInitState[st] = 0;
+        OMV.print(st);
+        OMV.println("&MOTORINIT&FAIL#");
+      }
+      break;
+    default:
+      break;
+  }
+  gotStretchFlag = LOW;
+}
+
+void executeManualOverride(int st) {
+  stArray[st] -> run(); // ASSUMED TO BE MANUAL MOTOR OVERRIDE
+    if (stArray[st]->distanceToGo() == 0) { // WHEN REACHED FINAL DESTINATION
+      manualOverride[st] = LOW; // turn off manual override
+      enableState[st] = HIGH; // disable motor
+  }
+}
+void executeMotorReset(int st) {
+  stArray[st]->setMaxSpeed(1000*MOTORRESOLUTION); // quick
+  stArray[st]->moveTo(0); // move back to 0 position
+  stArray[st]->run();
+  if (stArray[st]->distanceToGo() == 0) { // when reached final destination
+    enableState[st] = HIGH; // disable motor
+    resetFlag[st] = LOW; // turn off resetting
+    timers[st] = 0; // reset timer
+  }
+}
 void(* resetFunc) (void) = 0; //declare reset function @ address 0
 
 void setup() {
@@ -316,6 +479,10 @@ void setup() {
   pinMode(SLP, OUTPUT); digitalWrite(SLP, SLPVal);
   pinMode(PFD, OUTPUT); digitalWrite(PFD, PFDVal);
   pinMode(10, OUTPUT);  digitalWrite(10, LOW);
+  
+
+  pinMode(TTL_in, INPUT);
+  // attachInterrupt(digitalPinToInterrupt(28), interruptTTL, RISING);
   
   // pinMode(LEDPIN, OUTPUT); analogWrite(LEDPIN, map(LEDIN, 0, 100, 0, 256));
   // LEDVAL = map(LEDIN, 0, 100, 0, 256);
@@ -332,19 +499,19 @@ void setup() {
     stArray[st]->setPinsInverted(MOTORFLIP);
 
     period[st] = 1e6 / freqs[st];
-    for (int ph = 0; ph < 5; ph++) {
-      if (ph == 1 || ph == 2) {
+    for (int ph = 1; ph < 6; ph++) {
+      if (ph == 2 || ph == 3) {
         ts[st][ph] = sections[ph] * period[st] / 100;
         locPhase[st][ph] = dists[st];
       }
-      if (ph == 3) {
+      if (ph == 4) {
         ts[st][ph] = sections[ph] * period[st] / 100;
       }
-      if (ph == 4) {
+      if (ph == 5) {
         ts[st][ph] = period[st];
       }
     }
-    for (int ph = 0; ph < 4; ph++) {
+    for (int ph = 1; ph < 5; ph++) {
       speedPhase[st][ph] = (locPhase[st][ph + 1] - locPhase[st][ph]) / ( (ts[st][ph + 1] - ts[st][ph]) / 1e6 );
       if (isnan(speedPhase[st][ph])) {
         speedPhase[st][ph] = 0;
@@ -400,6 +567,11 @@ void setup() {
   for (int st = 0; st < 4; st++) {
     motorRetractFlag[st] = LOW;
   }
+
+  for (int st = 0; st < 4; st++) {
+    firstCycle[st] = LOW;
+    timers[st] = 0;
+  }
 }
 
 String partialReturn(char del) {
@@ -422,6 +594,68 @@ void loop() {
     }
     if (command.substring(0, 3) == "OMV") { // PASSTHROUGH TO OPENMV 
       OMV.print(command.substring(4, command.length()-1));
+    }
+    
+    else if (command.substring(0, 8) == "PROTOCOL") { // hardcode slow stretch based on rate of stretch
+      Serial.println(command);
+      // incoming string: <st>,<distance>,<duration of delay>,<duration of stretch>,<duration of hold>,<duration of fall>,<duration of rest>,<number of cycles>
+      int       st = command.substring(8,9).toInt();
+      // Serial.println(st);
+      int index = command.indexOf(',');
+      command = command.substring(index+1);
+      
+      index = command.indexOf(',');
+      int distance = command.substring(0, index).toInt();
+      command = command.substring(index+1);
+
+      index = command.indexOf(',');
+      float duration_of_delay = command.substring(0, index).toFloat();
+      command = command.substring(index + 1);
+
+      index = command.indexOf(',');
+      float duration_of_stretch = command.substring(0, index).toFloat();
+      command = command.substring(index + 1);
+
+      index = command.indexOf(',');
+      float duration_of_hold = command.substring(0, index).toFloat();
+      command = command.substring(index + 1);
+      
+      index = command.indexOf(',');
+      float duration_of_fall = command.substring(0, index).toFloat();
+      command = command.substring(index + 1);
+
+      index = command.indexOf(',');
+      float duration_of_rest = command.substring(0, index).toFloat();
+      command = command.substring(index + 1);
+
+      index = command.indexOf(',');
+      n_cycles[st] = command.substring(0, index).toInt();
+      command = command.substring(index + 1);
+
+      TTL_MODE = command.substring(0, command.length()-1).toInt();
+      if (TTL_MODE == HIGH) {
+        attachInterrupt(digitalPinToInterrupt(28), interruptTTL, RISING);
+      }
+      else {
+        detachInterrupt(digitalPinToInterrupt(28));
+      }
+      
+      ts[st][0] = 0; // beginning, 0
+      ts[st][1] = duration_of_delay*1000; // end of delay
+      ts[st][2] = (duration_of_delay + duration_of_stretch) * 1000; // end of rise
+      ts[st][3] = (duration_of_delay + duration_of_stretch + duration_of_hold) * 1000; // end of hold
+      ts[st][4] = (duration_of_delay + duration_of_stretch + duration_of_hold + duration_of_fall)*1000; // end of fall
+      ts[st][5] = (duration_of_delay + duration_of_stretch + duration_of_hold + duration_of_fall + duration_of_rest)*1000; // end of cycle (full period)
+      period[st] = ts[st][5];
+
+      
+      speedPhase[st][1] = distance/(duration_of_stretch/1000);
+      speedPhase[st][3] = -1*distance/(duration_of_fall/1000);
+
+      locPhase[st][2] = distance;
+      locPhase[st][3] = distance;
+      dists[st] = distance;
+
     }
     else if (command.substring(0, 3) == "LED") {
       LEDIN = command.substring(4, command.length()-1 ).toInt();
@@ -643,7 +877,42 @@ void loop() {
       // Serial.println('#');
 
     }
+    
     // MOTOR COMMANDS
+    else if (command.substring(0,1) == "E") { // enable/disable multiple motors
+      // E<enable row D><enable row C><enable row B><enable row A>
+
+      if (command.length() > 4) {
+        if (command.substring(1,2).toInt() == 1) {
+            MotorEnable(0);
+        }
+        if (command.substring(2,3).toInt() == 1) {
+          MotorEnable(1);
+        }
+        if (command.substring(3,4).toInt() == 1) {
+          MotorEnable(2);
+        }
+        if (command.substring(4,5).toInt() == 1) {
+          MotorEnable(3);
+        }
+      }
+    }
+    else if (command.substring(0,1) == "P") { // manually move multiple motors
+      int distance = command.substring(command.indexOf(',')+1, command.length()-1).toInt();
+      if (command.substring(1,2).toInt() == 1) {
+        MotorManual(0, distance);
+      }
+      if (command.substring(2,3).toInt() == 1) {
+        MotorManual(1, distance);
+      }
+      if (command.substring(3,4).toInt() == 1) {
+        MotorManual(2, distance);
+      }
+      if (command.substring(4,5).toInt() == 1) {
+        MotorManual(3, distance);
+      }
+
+    }
     else if (command.substring(0, 1) == "M") { // enable/disable Motor
       int st = command.substring(1, 2).toInt();
       MotorEnable(st);
@@ -843,26 +1112,60 @@ void loop() {
 
   }
 
+  // if (TTL_MODE == HIGH) { // in TTL mode, wait for TTL Trigger to execute protocol
+  //   if (TTL_received == HIGH) {
+  //     TTL_received = LOW;
+      
+  //     for (int st = 0; st < 4; st++) {
+  //       digitalWrite(EN[st], enableState[st]);
 
+  //     }
+
+
+  //   }
+  // }
   // MOTOR UPDATE
   for (int st = 0; st < 4; st++) {
-    // enableState[st] = LOW;
+
     digitalWrite(EN[st], enableState[st]);
-
-    if (timers[st] > period[st])  { // RESET TIMER IF PAST PERIOD LENGTH
-      timers[st] = 0;   
-    }
-    if (firstCycle[st])           { // RESET TIMER IF FIRST CYCLE, SWITCH TO SECOND CYCLE
-      timers[st] = 0;  
-      firstCycle[st] = LOW;
-    }
-    if (enableState[st] == HIGH)  { // HOLD TIMER AT BEGINNING OF CYCLE IF LOW
-      timers[st] = 0;  
-    }
-
-
     
+    if (enableState[st] == HIGH)  { // HOLD TIMER AT BEGINNING OF CYCLE IF LOW
+        timers[st] = 0;  
+        continue;
+      }
     if (enableState[st] == LOW) { // MOTOR IS ENABLED
+      if (timers[st] > period[st])  { // RESET TIMER IF PAST PERIOD LENGTH
+        timers[st] = 0;   
+        cycle_count[st] = cycle_count[st] + 1; // increment number of cycles
+      }
+
+      if (n_cycles[st] != -1) { // if not inf loop
+
+        if (cycle_count[st] >= n_cycles[st]) { // cycle is greater than number of cycles desired
+          if (TTL_MODE == HIGH) { // externally triggering
+            cycle_count[st] = 0;
+            timers[st] = 0;
+            TTL_received = LOW; // wait for the next TTL trigger (but don't disable the motor)
+          }
+          else { // open loop
+            cycle_count[st] = 0;
+            timers[st] = 0;
+            enableState[st] = HIGH; // disable motor
+
+          }
+        
+        }
+      }
+      if (TTL_MODE == HIGH) {
+        if (TTL_received == LOW) { // if not received TTL, hold timer at 0
+          timers[st] = 0;
+        }
+      }
+      
+      
+
+
+      
       /*
       Order by priority: 
         1. Emergency retract
@@ -873,142 +1176,41 @@ void loop() {
       */
       // MotorInited[st] = HIGH;
       if (motorRetractFlag[st] == HIGH) { // EMERGENCY RETRACT
-        stArray[st]->moveTo(-2000*MOTORRESOLUTION); // MOVE ARBITRARILY BACK
-        stArray[st]->setMaxSpeed(5000*MOTORRESOLUTION); // SET HIGH SPEED
-        stArray[st]->setAcceleration(10000*MOTORRESOLUTION); // SET HIGH ACCELERATION
-        stArray[st]->run();
-        if (stArray[st]->distanceToGo() == 0) { 
-          motorRetractFlag[st] = LOW; 
-          MotorResetPosition(st);
-        }
+        executeMotorRetraction(st);
+        
       }
       
       else if (motorInitState[st] > 0) { // Do something if it's not 0 or -1
-        switch (motorInitState[st]) {
-          case 0: // Somehow got through if-else condition
-            break;
-          case 1: // Bring up 500 steps, before initialization
-            if (CameraInited[st] == HIGH) {
-              OMV.print(st);
-              OMV.println("&MOTORINIT&HOME#");
-              motorInitState[st] = 2;
-            }
-            else {
-              motorInitState[st] = 0; // exit out of motor initialization immediately
-            }
-            break;
-          case 2:
-            stArray[st]->setMaxSpeed(3000*MOTORRESOLUTION);
-            stArray[st]->setAcceleration(2000*MOTORRESOLUTION);
-            stArray[st]->moveTo(-5000*MOTORRESOLUTION);
-            stArray[st]->run();
-            
-            
-            if (stArray[st]->distanceToGo() == 0) { 
-              motorInitState[st] = 3; // Continue onto next phase
-              stArray[st]->setCurrentPosition(0);
-              // CameraInited[st] = LOW; // Force low
-              // OMV.print(st);
-              // OMV.println("&MOTORINIT&HOME#");
-              }
-            break;
-          case 3: // Bring down 3000 steps, fast
-            stArray[st]->moveTo(3000*MOTORRESOLUTION);
-            stArray[st]->setMaxSpeed(1000*MOTORRESOLUTION); // Fast speed
-            stArray[st]->setAcceleration(3000*MOTORRESOLUTION); // Fast acceleration
-            stArray[st]->run();
-            if (stretchValue > 2 && gotStretchFlag==HIGH) { // as bring down, check for stretch value return
-              stArray[st]->setCurrentPosition(0); // set current position to 0 (for relative position)
-              motorInitState[st] = 5; // Continue onto next phase
-              OMV.print(st);
-              OMV.println("&MOTORINIT&HOME#");
-            }
-            if (stArray[st]->distanceToGo() == 0) { // if reached 3000 steps, still continue down, but slower
-              motorInitState[st] = 4;
-              stArray[st]->setCurrentPosition(0);
-              OMV.print(st);
-              OMV.println("&INIT#"); // RE-INITIALIZE CAMERA
-              waitForCameraInit = HIGH;
-            }
-            break;
-          case 4:
-            if (waitForCameraInit == LOW) {
-              motorInitState[st] = 5;
-              waitForCameraInit = HIGH;
-            }
-          case 5: // Bring down arbitrarily, monitor for stretch
-            stArray[st]->moveTo(750*MOTORRESOLUTION); // Arbitrarily down
-            stArray[st]->setMaxSpeed(50*MOTORRESOLUTION); // Slow speed
-            stArray[st]->setAcceleration(50*MOTORRESOLUTION); // Matching acceleration
-            stArray[st]->run();
-            if (stretchValue > 2 && gotStretchFlag==HIGH) { // as bring down, check for stretch value return
-              stArray[st]->setCurrentPosition(0); // set current position to 0 (for relative position)
-              motorInitState[st] = 6; // Continue onto next phase
-              OMV.print(st);
-              OMV.println("&MOTORINIT&HOME#");
-            }
-            else if (stArray[st]->distanceToGo() == 0) { // If reached arbitrarily low destination (too far)
-              MotorRetract(st); // Retract Motor
-              motorInitState[st] = 0; // Stop Motor Initialization
-              OMV.print(st);
-              OMV.println("&MOTORINIT&FAIL#");
-            }
-            
-            break;
-          case 6: // Bring up 200 steps (somewhat arbitrary), monitor for lack of stretch
-            stArray[st]->setMaxSpeed(25*MOTORRESOLUTION); // slow
-            stArray[st]->setAcceleration(25*MOTORRESOLUTION); // matching acceleration
-            stArray[st]->moveTo(-200*MOTORRESOLUTION); // stop at -200 (in case of error)
-            stArray[st]->run();
-            
-            if (gotStretchFlag == HIGH && stretchValue < 0.5) {
-              enableState[st] = HIGH; // DISABLE MOTOR
-              MotorInited[st] = HIGH; // MOTOR INITIALIZED
-              MotorResetPosition(st);
-              stArray[st]->setAcceleration(100000*MOTORRESOLUTION);
-              motorInitState[st] = -1;
-              OMV.print(st);
-              OMV.println("&MOTORINIT&PASS#");
-            }
-            else if (stArray[st]->distanceToGo() == 0) { // FAILED MOTOR INIT
-              MotorInited[st] = LOW;
-              enableState[st] = HIGH;
-              MotorResetPosition(st);
-              stArray[st]->setAcceleration(100000*MOTORRESOLUTION);
-              motorInitState[st] = 0;
-              OMV.print(st);
-              OMV.println("&MOTORINIT&FAIL#");
-            }
-            break;
-          default:
-            break;
-        }
-        gotStretchFlag = LOW;
+        executeMotorInitialization(st);
+        
       }
 
       else if (resetFlag[st] == HIGH) { // MOTOR RESET
-        stArray[st]->setMaxSpeed(1000*MOTORRESOLUTION); // quick
-        stArray[st]->moveTo(0); // move back to 0 position
-        stArray[st]->run();
-        if (stArray[st]->distanceToGo() == 0) { // when reached final destination
-          enableState[st] = HIGH; // disable motor
-          resetFlag[st] = LOW; // turn off resetting
-          timers[st] = 0; // reset timer
-        }
+        executeMotorReset(st);
+        
       }
       else if (manualOverride[st] == HIGH) { // MANUAL OVERRIDE OF POSITION (RUN AS FAST TO DESIGNATED POSITION)
-        stArray[st] -> run(); // ASSUMED TO BE MANUAL MOTOR OVERRIDE
-        if (stArray[st]->distanceToGo() == 0) { // WHEN REACHED FINAL DESTINATION
-          manualOverride[st] = LOW; // turn off manual override
-          enableState[st] = HIGH; // disable motor
-        }
+        executeManualOverride(st);
+        
       }
-      else { //if (MotorInited[st] == HIGH) {
-        int inPhase = 4;
-        inPhase = checkPhase(timers[st], ts[st]);
-        stArray[st]->setMaxSpeed(abs(speedPhase[st][inPhase - 1])); // set speed to phase speed
-        stArray[st]->moveTo(locPhase[st][inPhase]); // set position to phase destination
-        stArray[st]->run();
+
+      else { // NORMAL CYCLING
+        if (TTL_MODE == HIGH) { // TTL enabled
+          if (TTL_received == HIGH) { // only cycle if TTL is received
+            int inPhase = 0;
+            inPhase = checkPhase(timers[st], ts[st]);
+            stArray[st]->setMaxSpeed(abs(speedPhase[st][inPhase - 1])); // set speed to phase speed
+            stArray[st]->moveTo(locPhase[st][inPhase]); // set position to phase destination
+            stArray[st]->run();
+          }
+        }
+        else { // normal cycling, do not wait for TTL
+          int inPhase = 0;
+          inPhase = checkPhase(timers[st], ts[st]);
+          stArray[st]->setMaxSpeed(abs(speedPhase[st][inPhase - 1])); // set speed to phase speed
+          stArray[st]->moveTo(locPhase[st][inPhase]); // set position to phase destination
+          stArray[st]->run();
+        }
       }
     }
 
@@ -1089,8 +1291,18 @@ void loop() {
         Serial.print('&');
         Serial.print(dists[st]);
         Serial.print('&');
-        Serial.print(freqs[st]);
+        Serial.print(ts[st][1]);
         Serial.print('&');
+        Serial.print(ts[st][2]);
+        Serial.print('&');
+        Serial.print(ts[st][3]);
+        Serial.print('&');
+        Serial.print(ts[st][4]);
+        Serial.print('&');
+        Serial.print(ts[st][5]);
+        Serial.print('&');
+        // Serial.print(TTL_MODE);
+        // Serial.print('&');
         Serial.print(passive_len[st]);
         Serial.print('&');
         Serial.print(MotorInited[st]);
@@ -1099,7 +1311,11 @@ void loop() {
         Serial.print('&');
         Serial.print(enableState[st]);
         Serial.print('&');
-        Serial.print(motorInitState[st]);
+        Serial.print(cycle_count[st]);
+        Serial.print('&');
+        Serial.print(n_cycles[st]);
+        // Serial.print('&');
+        // Serial.print(speedPhase[st][1]);
         Serial.print(';');
         //            Serial.print(enableState[st]);
       }
@@ -1122,7 +1338,10 @@ void loop() {
       Serial.print('&');
       Serial.print(algorithm_magnet_flag);
       Serial.print('&');  
-      
+      Serial.print(TTL_received);
+      Serial.print('&');
+      Serial.print(TTL_MODE);
+      Serial.print('&');
       Serial.print(comm_time);
       Serial.println(' ');
       timerSerial = 0;
