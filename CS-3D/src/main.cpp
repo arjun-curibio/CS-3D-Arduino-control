@@ -116,6 +116,7 @@ int passive_len[4]      = {100,       100,      100,      100};
 int mag_thresh[4][2]    = {{20, 40}, {20, 40}, {20, 40}, {20, 40}};
 int post_thresh[4][2]   = {{0, 15},  {0, 15},  {0, 15},  {0, 15}};
 int post_centroid[4][2] = {{0, 0},   {0, 0},   {0, 0},   {0, 0}};
+int magnet_centroid[4][2] = {{0, 0},   {0, 0},   {0, 0},   {0, 0}};
 
 const int LEDPIN = 28;
 int LEDVAL = 256; int LEDIN = 100;
@@ -391,7 +392,7 @@ void executeMotorInitialization(int st) {
         motorInitState[st] = 4;
         stArray[st]->setCurrentPosition(0);
         OMV.print(st);
-        OMV.println("&INIT#"); // RE-INITIALIZE CAMERA
+        OMV.println("&SOFTINIT#"); // RE-INITIALIZE CAMERA
         waitForCameraInit = HIGH;
       }
       break;
@@ -595,7 +596,7 @@ void loop() {
     if (command.substring(0, 3) == "OMV") { // PASSTHROUGH TO OPENMV 
       OMV.print(command.substring(4, command.length()-1));
     }
-    
+
     else if (command.substring(0, 8) == "PROTOCOL") { // hardcode slow stretch based on rate of stretch
       Serial.println(command);
       // incoming string: <st>,<distance>,<duration of delay>,<duration of stretch>,<duration of hold>,<duration of fall>,<duration of rest>,<number of cycles>
@@ -1037,9 +1038,27 @@ void loop() {
       foundMax = mv.substring(0,index).toInt();
       mv = mv.substring(index + 1);
 
-      index = mv.indexOf('[');
-      int index2 = mv.indexOf(']');
-      maxs = mv.substring(index, index2+1);
+      // index = mv.indexOf('[');
+      // int index2 = mv.indexOf(']');
+      // maxs = mv.substring(index, index2+1);
+      // mv = mv.substring(index2);
+
+      index = mv.indexOf('#');
+      magnet_centroid[CameraUnderWell][0] = mv.substring(0, index).toInt();
+      mv = mv.substring(index + 1);
+      
+      index = mv.indexOf('#');
+      magnet_centroid[CameraUnderWell][1] = mv.substring(0, index).toInt();
+      mv = mv.substring(index + 1);
+      
+      index = mv.indexOf('#');
+      post_centroid[CameraUnderWell][0] = mv.substring(0, index).toInt();
+      mv = mv.substring(index + 1);
+
+      index = mv.indexOf('#');
+      post_centroid[CameraUnderWell][1] = mv.substring(0, index).toInt();
+      mv = mv.substring(index + 1);
+
     }
     if (magic == -43) { // <t>&<current_well>&<passive_length>&<magnet_thresh>&<post_threshold>&<centroid_post>\n
       CameraInited[CameraUnderWell] = HIGH;
@@ -1273,8 +1292,17 @@ void loop() {
       Serial.print('&');
       Serial.print(foundMax);
       Serial.print('&');
-      Serial.print(maxs);
+      // Serial.print(maxs);
+      // Serial.print('&');
+      Serial.print(magnet_centroid[CameraUnderWell][0]);
       Serial.print('&');
+      Serial.print(magnet_centroid[CameraUnderWell][1]);
+      Serial.print('&');
+      Serial.print(post_centroid[CameraUnderWell][0]);
+      Serial.print('&');
+      Serial.print(post_centroid[CameraUnderWell][1]);
+      Serial.print('&');
+      
       Serial.print(magic);
       
       Serial.print(';');

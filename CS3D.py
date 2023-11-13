@@ -1,111 +1,24 @@
 from serial import Serial
 import tkinter as tk
-from tkinter.filedialog import asksaveasfilename, askopenfilename
+from tkinter.filedialog import asksaveasfilename, askopenfilename, askdirectory
 from tkinter import font
 import threading
 from matplotlib.figure import Figure
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
 import json, sys, pyopenmv, pygame, os
-from math import floor
 from datetime import datetime
 from serial.tools.list_ports import comports
 from time import time
 import cv2
-class Motor:
-    def __init__(self, ID):
-        self.ID = ID
-        self.t = 0
-        self.p = 0
-        self.d = 0
-        self.f = 1
+from pathlib import Path
 
-        self.speed_rise = 1
-        self.speed_fall = 1
-
-
-        self.enabled = True
-        self.homed = False
-        self.initialized = False
-        self.homing_stage = -1
-
-        self.cycle_count = 0
-        self.n_cycles = -1
-
-        self.assigned_protocol = True
-        self.ts = [0,0,0,0,0,0]
-    
-    def update_motor(self,t=0, p=0, d=0, speed_rise=1, speed_fall=1, enabled=False, homed=False, initialized=False, homing_stage=-1, cycle_count= 0, n_cycles=1, ts = [0,0,0,0,0,0]):
-        self.t = t
-        self.p = p
-        self.d = d
-
-        self.enabled = enabled
-        self.homed = homed
-        self.initialized = initialized
-        self.homing_stage = homing_stage
-
-        self.cycle_count = cycle_count
-        self.n_cycles = n_cycles
-
-        self.speed_rise = speed_rise
-        self.speed_fall = speed_fall
-
-        self.ts = ts
-        
-    
-    def display(self):
-        if self.n_cycles == -1:
-            temp = 'inf'
-            len_temp = 5
-        else:
-            temp = str(self.n_cycles)
-            len_temp = len(str(self.n_cycles))
-
-        if self.enabled:
-            temp2 = " ENABLED"
-        else:
-            temp2 = "DISABLED"
-
-        printfunc("ID {}: t={:>5} ms, p={:>{}}/{:>{}}, speeds = [{:>{}} | {:>{}}] steps/s, {}, cycle = {:>{}}/{:<{}}, ts = {}".format(self.ID, self.t, 
-            self.p, len(str(self.d)), 
-            self.d, len(str(self.d)),
-            round(self.speed_rise,2), len(str(round(self.speed_rise,2))),
-            round(self.speed_fall,2), len(str(round(self.speed_fall,2))),
-            temp2, 
-            self.cycle_count, len_temp,
-            temp, len_temp,
-            self.ts,
-            ), end=' ')
-        
-class Protocol:
-    def __init__(self):
-        self.distance = 300
-        self.pre_stretch_delay = 0
-        self.stretch_duration=500
-        self.hold_duration = 100
-        self.unstretch_duration = 500
-        self.rest_duration = 3000
-        self.n_cycles = 1
-        self.ext_trig = 0
-        self.assigned_to = [False, False, False, False]
-    
-    def update(self, distance=None, pre_stretch_delay = None, stretch_duration = None, hold_duration = None, unstretch_duration = None, rest_duration = None, n_cycles = None, ext_trig = None, assigned_to = None):
-        if distance             != None: self.distance              = distance
-        if pre_stretch_delay    != None: self.pre_stretch_delay     = pre_stretch_delay
-        if stretch_duration     != None: self.stretch_duration      = stretch_duration
-        if hold_duration        != None: self.hold_duration         = hold_duration
-        if unstretch_duration   != None: self.unstretch_duration    = unstretch_duration
-        if rest_duration        != None: self.rest_duration         = rest_duration
-        if n_cycles             != None: self.n_cycles              = n_cycles
-        if ext_trig             != None: self.ext_trig              = ext_trig
-        if assigned_to          != None: self.disassigned_totance   = assigned_to
-    
+from CS3D_aux import *
 
 class CS3D:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.geometry("900x560")
+        self.root.geometry("1300x560")
         self.root.configure({"background":'white'})
         self.root.resizable(0,0)
         self.root.protocol("WM_DELETE_WINDOW", self.destroy)
@@ -184,7 +97,7 @@ class CS3D:
         
         self.camera_row = 'D'
         self.camera_enable = False
-        self.camera_positioSn = 0
+        self.camera_position = 0
         self.camera_well = 0
         self.running_processing = True
         self.save_image_as_video = False
@@ -199,39 +112,53 @@ class CS3D:
         self.make_a_rect = False
 
         self.post_manual = (53,125)
-
+        self.recording = False
         self.ttl_received = 0
         self.ttl_mode = 0
         self.n_ttl = 0
 
+        self.monitor_ttl_for_recording = False
+        self.got_ttl = False
         self.frame_rate = 30
+        self.last_framerates = []
         self.tracking_t = 0
+
         # self.waveform_root.protocol("MW_DELETE_WINDOW", self.waveform_window_close)
         
         # CONFIGURE GLOBAL COMMAND BUTTONS
-        self.configure_global_commands()
 
         
         # CONFIGURE EACH ROW
         for i in range(4):
             self.configure_row(i)
-            
-        self.protocol = Protocol()
-        self.passed_check_protocol = False
-        self.protocol_display_message = ''
-        self.protocol_running = False
-        self.EXTERNAL_TRIGGER_FLAG = False
-        self.configure_protocol_frame()
+        self.configure_global_commands()
+
+        # self.protocol = Protocol()
         
+
+        
+        self.DEFAULT_PARENT_FOLDER              = os.path.join(os.path.abspath(os.curdir), 'data')
+        self.CURR_FOLDER                        = os.path.abspath(os.curdir)
+        self.CONFIG_FOLDER                      = os.path.join(self.CURR_FOLDER, 'config')
+        self.CONFIG_FILEHANDLING_FILEPATH       = os.path.join(self.CONFIG_FOLDER, 'file_config.json')
+        self.CONFIG_PROTOCOL_FILEPATH           = os.path.join(self.CONFIG_FOLDER, 'protocol_config.json')
+        if not os.path.exists(self.CONFIG_FOLDER ): 
+            try:  os.makedirs(self.CONFIG_FOLDER , exist_ok=True)
+            except PermissionError: print("PERMISSION DENIED IN {}. FATAL ERROR, EXITING.".format(self.CURR_FOLDER))
+
+        
+        self.configure_protocol_frame()
+        self.configure_file_handling()
+        self.frame_file.place(x=500, y=10, width=600, height=150)
+        self.protocol_frame.place(bordermode=tk.OUTSIDE, x=450, y=175, width=1000, height=400)
+
         # get starting information from arduino
         motor_info = self.get_motor_tx()
         magic = self.extract_magic_number(motor_info)
+        magic = '-1'
         ret = self.decode_motor_information(motor_info, magic)
         
         self.start_t = self.global_t    
-
-
-
 
 
     def send_command(self):
@@ -247,17 +174,16 @@ class CS3D:
     def toggle_feedback(self):
         if self.feedback_active_flag[self.well_motor]:
             self.feedback_active_flag[self.well_motor] = False
-            self.configure_button(self.button_toggle_feedback, text='Toggle Feedback\n(off)', borderwidth=2)
+            configure_button(self.button_toggle_feedback, text='Toggle Feedback\n(off)', borderwidth=2)
         else:
             self.feedback_active_flag[self.well_motor] = True
-            self.configure_button(self.button_toggle_feedback, text='Toggle Feedback\n(on)', borderwidth=5)
+            configure_button(self.button_toggle_feedback, text='Toggle Feedback\n(on)', borderwidth=5)
 
     def configure_row(self, i):
         def move_camera(motor=i):
             string = "C{},{}\n".format(motor, self.well_locations[motor])
-            current_filename = self.name_var.get()
 
-            self.name_var.set(self.well_labels[motor] + current_filename[1:])
+            self.well_string.set(self.well_labels[motor] + self.well_string.get()[1:])
             self.write_to_motors(string)
             self.button_move_to[self.well_motor].configure(text='Move Camera\nto Row {}'.format(self.well_labels[self.well_motor]))
             self.button_move_to[self.well_motor].configure(borderwidth=2)
@@ -267,16 +193,16 @@ class CS3D:
             self.button_move_to[self.well_motor].configure(borderwidth=7)
             self.button_move_to[self.well_motor].configure(state='disabled')
             
-            self.frame_initialization.place(x=330, y=315-(motor*105))
+            # self.frame_initialization.place(x=330, y=315-(motor*105))
             if self.motors[self.well_motor].initialized == True:
-                self.configure_button(self.button_initialize_camera, 'Reset\nCamera')
+                configure_button(self.button_initialize_camera, 'Reset\nCamera')
             else:
-                self.configure_button(self.button_initialize_camera, 'Initialize\nCamera')
-            # self.configure_button(self.button_initialize_camera,    location=[350, 315-(motor*105), 100, 40])
-            # self.configure_button(self.button_home_motor,           location=[350, 350-(motor*105), 100, 25])
-            # self.configure_button(self.button_adj_down,             location=[450, 350-(motor*105), 20, 20])
-            # self.configure_button(self.button_adj_up,               location=[330, 350-(motor*105), 20, 20])
-            # self.configure_button(self.button_toggle_feedback,      location=[340, 400-(motor*105), 120, 40])
+                configure_button(self.button_initialize_camera, 'Initialize\nCamera')
+            # configure_button(self.button_initialize_camera,    location=[350, 315-(motor*105), 100, 40])
+            # configure_button(self.button_home_motor,           location=[350, 350-(motor*105), 100, 25])
+            # configure_button(self.button_adj_down,             location=[450, 350-(motor*105), 20, 20])
+            # configure_button(self.button_adj_up,               location=[330, 350-(motor*105), 20, 20])
+            # configure_button(self.button_toggle_feedback,      location=[340, 400-(motor*105), 120, 40])
             # print([[350, 315-(i*105), 100, 40]])
         def retract_motor(motor=i):
             string = "X{}\n".format(motor)
@@ -284,8 +210,8 @@ class CS3D:
         def enable_motor(motor=i):
             string = "M{}\n".format(motor)
             self.write_to_motors(string)
-            if self.motors[motor].enabled:  self.configure_button(self.button_start[motor],text='Stop', state='normal',borderwidth=5, bg='green')
-            else:                           self.configure_button(self.button_start[motor],text='Start', state='normal',borderwidth=2, bg='green')
+            if self.motors[motor].enabled:  configure_button(self.button_start[motor],text='Stop', state='normal',borderwidth=5, bg='green')
+            else:                           configure_button(self.button_start[motor],text='Start', state='normal',borderwidth=2, bg='green')
             self.button_start[motor].update()
         def move_camera_up(motor=i):
             string = "C{},{}\n".format(motor, self.well_locations[motor]+100)
@@ -305,47 +231,40 @@ class CS3D:
         self.frames[i].place(bordermode=tk.OUTSIDE, x=0, y=315-(i*105))
 
         # ADD BUTTONS
-        self.configure_button(self.button_move_to[i],   "Move to Row {}".format(self.well_labels[i]), move_camera, 12, location=[0,0,145,50])
-        self.configure_button(self.button_retract[i],   'Retract Motor', retract_motor,location=[155,50,135,40], fontsize=12)
-        self.configure_button(self.button_start[i],     'Start', enable_motor, location=[155,0,135,40], fontsize=14)
-        # self.configure_button(self.button_waveform[i],  'Shape', open_waveform_dialog, location=[105,60,50,25], fontsize=8)
+        configure_button(self.button_move_to[i],   "Move to Row {}".format(self.well_labels[i]), move_camera, 12, location=[0,0,145,50])
+        configure_button(self.button_retract[i],   'Retract Motor', retract_motor,location=[155,50,135,40], fontsize=12)
+        configure_button(self.button_start[i],     'Start', enable_motor, location=[155,0,135,40], fontsize=14)
+        # configure_button(self.button_waveform[i],  'Shape', open_waveform_dialog, location=[105,60,50,25], fontsize=8)
         self.button_start[i].configure(self.enable_motor_configuration('stopped'))
         
-        self.configure_button(self.button_camera_up[i], "+", move_camera_up, 12, [75, 70, 25, 25])
-        self.configure_button(self.button_camera_down[i], "-", move_camera_down, 12, [25, 70, 25, 25])
+        configure_button(self.button_camera_up[i], "+", move_camera_up, 12, [75, 70, 25, 25])
+        configure_button(self.button_camera_down[i], "-", move_camera_down, 12, [25, 70, 25, 25])
         
         # ADD LABELS
-        self.configure_label(tk.Label(self.frames[i]), "Camera Adjust: ", fontsize=8, anchor='e', location=[25, 50, -1, -1])
-
+        configure_label(tk.Label(self.frames[i]), "Camera Adjust: ", fontsize=8, anchor='e', location=[25, 50, -1, -1])
 
     def configure_global_commands(self):
-        self.button_reset_camera_position   = self.configure_button(tk.Button(self.root), "Reset Camera\nPosition", self.reset_camera_position, 10, [100, 430, 100, 50])
-        self.button_retract_all_motors      = self.configure_button(tk.Button(self.root), "Retract All\nMotors",    self.retract_all_motors,    10, [200, 430, 100, 50])
-        self.button_stop_all_motors         = self.configure_button(tk.Button(self.root), "Stop All\nMotors",       self.stop_all_motors,       10, [0, 430, 100, 50])
-        self.button_teardown                = self.configure_button(tk.Button(self.root), "Teardown\nMotors",       self.teardown_motors,       10, [200,480,100,50])
+        self.button_reset_camera_position   = configure_button(tk.Button(self.root), "Reset Camera\nPosition", self.reset_camera_position, 10, [100, 430, 100, 50])
+        self.button_retract_all_motors      = configure_button(tk.Button(self.root), "Retract All\nMotors",    self.retract_all_motors,    10, [200, 430, 100, 50])
+        self.button_stop_all_motors         = configure_button(tk.Button(self.root), "Stop All\nMotors",       self.stop_all_motors,       10, [0, 430, 100, 50])
+        self.button_teardown                = configure_button(tk.Button(self.root), "Teardown\nMotors",       self.teardown_motors,       10, [200, 530, 100, 50])
+        
 
         self.frame_initialization           = tk.Frame(self.root)
-        self.button_initialize_camera       = self.configure_button(tk.Button(self.frame_initialization), "Initialize\nCamera",     self.initialize_camera,     10, [20, 0, 100, 40])
-        self.button_home_motor              = self.configure_button(tk.Button(self.frame_initialization), "Home Motor",             self.home_motor,            10, [20, 40, 100, 25])
-        self.button_adj_up                  = self.configure_button(tk.Button(self.frame_initialization), "-",                      lambda: self.send_adj(0),   10, [0, 42.5, 20, 20])
-        self.button_adj_down                = self.configure_button(tk.Button(self.frame_initialization), "+",                      lambda: self.send_adj(1),   10, [120, 42.5, 20, 20])
-        self.button_record_video            = self.configure_button(tk.Button(self.frame_initialization), "Record\nVideo",          self.toggle_video_recording,10, [20, 65, 100, 40])
-        # self.button_toggle_feedback         = self.configure_button(tk.Button(self.frame_initialization), "Toggle Feedback\n(off)", command=self.toggle_feedback, fontsize=10, location=[10, 110, 120, 40])
+        self.button_initialize_camera       = configure_button(tk.Button(self.frame_initialization), "Initialize\nCamera",     self.initialize_camera,     10, [20, 0, 100, 40])
+        self.button_home_motor              = configure_button(tk.Button(self.frame_initialization), "Home Motor",             self.home_motor,            10, [20, 40, 100, 25])
+        self.button_adj_up                  = configure_button(tk.Button(self.frame_initialization), "-",                      lambda: self.send_adj(0),   10, [0, 42.5, 20, 20])
+        self.button_adj_down                = configure_button(tk.Button(self.frame_initialization), "+",                      lambda: self.send_adj(1),   10, [120, 42.5, 20, 20])
+        self.button_record_video            = configure_button(tk.Button(self.frame_initialization), "Record\nContinuous",     self.toggle_video_recording,10, [20, 65, 100, 40])
+        self.button_record_by_ttl           = configure_button(tk.Button(self.frame_initialization), "Record\nBy TTL",         self.toggle_video_by_ttl,   10, [20, 105, 100, 40])
+        # self.button_toggle_feedback         = configure_button(tk.Button(self.frame_initialization), "Toggle Feedback\n(off)", command=self.toggle_feedback, fontsize=10, location=[10, 110, 120, 40])
         
-        self.name_var = tk.StringVar(self.frame_initialization, 'D')
-        self.plate_name_var = tk.StringVar(self.frame_initialization, 'PLT001')
+        # configure_label(tk.Label(self.frame_initialization), "Plate: ", location=[0,155,150, 25], fontsize=10, anchor='w')
+        # configure_entry(tk.Entry(self.frame_initialization), self.plate_name_var, [0,180,150,25], 10)
         
-        self.full_filename = ''
-        self.configure_label(tk.Label(self.frame_initialization), 'Filename: ', location=[0, 105, 150, 25], fontsize=10,anchor='w')
-        self.configure_entry(tk.Entry(self.frame_initialization), self.name_var,         [0,130,150,25], 10)
-        
-        self.configure_label(tk.Label(self.frame_initialization), "Plate: ", location=[0,155,150, 25], fontsize=10, anchor='w')
-        self.configure_entry(tk.Entry(self.frame_initialization), self.plate_name_var, [0,180,150,25], 10)
-        
-        self.entry_command                  = self.configure_entry(tk.Entry(self.root),     textvariable=self.command, location=[10, 500, -1, -1], fontsize=10 )
+        self.entry_command                  = configure_entry(tk.Entry(self.root),     textvariable=self.command, location=[25, 500, -1, -1], fontsize=10 )
         self.entry_command.bind('<Return>', func=lambda val: self.send_command())
         self.entry_command.bind
-
 
         self.frame_initialization.configure({  'background':'white', 
                                         'borderwidth':0,
@@ -354,115 +273,691 @@ class CS3D:
                                         'height':250})
         self.frame_initialization.place(x=330, y=315)
 
+    def file_dialog(self):
+        root = tk.Tk('Parent Folder for Data')
+        root.withdraw()
+        self.parent_directory = askdirectory(parent=root)
+        root.destroy()
+        if len(self.parent_directory) == 0:
+            self.parent_directory = self.DEFAULT_PARENT_FOLDER
+        self.parent_folder.set(self.parent_directory)
+        
+
+        self.update_filename(1)
+        
+    def update_filename(self, event=0, *args):
+        self.warnings = {}
+        self.warning_idx = 0
+        
+        # get subfolder name if available
+        subfolder = [self.day.get(), self.experiment.get()]
+        subfolder = [x for x in subfolder if x]
+        self.day_and_experiment = ' - '.join(subfolder)
+        
+        if len(self.day.get()) == 0:        
+            self.warnings[self.warning_idx] = ('day missing',1)
+            self.warning_idx += 1
+
+        if len(self.platename.get()) == 0:
+            self.warnings[self.warning_idx] = ('plate missing',1)
+            self.warning_idx += 1
+        if len(self.well_string.get()) == 0:
+            self.warnings[self.warning_idx] = ('well missing',1)
+            self.warning_idx += 1
+
+
+        # get different data folder if file tree is generated
+        if self.generate_file_tree.get():   self.data_folder.set(os.path.join(self.parent_folder.get(), self.day_and_experiment, self.platename.get())) # subfolders for day/experiment and plate
+
+        else:                               self.data_folder.set(os.path.join(self.parent_folder.get())) # put data into parent folder (selected by user)
+            
+        strings = [self.platename.get(), self.day.get(), self.well_string.get(), self.experiment.get(), self.experiment_info.get()] # all fields for the filename
+        strings = [x for x in strings if x] # combine all the ones that have data in them
+        self.filename.set('_'.join(strings))
+        self.full_filename.set(os.path.join(self.data_folder.get(), self.filename.get()))
+
+        self.data_folder_exists = os.path.exists(self.data_folder.get())
+
+        if not self.data_folder_exists: # if the data folder does not exist
+            if 'data folder exist' not in self.warnings.values(): # if the warning is not already present, add
+                self.warnings[self.warning_idx] = ('data folder exist',0)
+                self.warning_idx += 1
+            pass
+        
+        # add all warnings to GUI
+        all_txt_warnings = ''
+        self.proceed_with_recording = True
+        for key, value in self.warnings.items():
+            if value[0] == 'data folder exist':
+                all_txt_warnings += 'Data Folder does not currently exist. Creating folder tree during recording.\n'
+            if value[0] == 'day missing':
+                all_txt_warnings += 'ERROR: Input a value in the Day field.\n'
+
+            if value[0] == 'plate missing':
+                all_txt_warnings += 'ERROR: Input a value in the Plate field.\n'
+            if value[0] == 'well missing':
+                all_txt_warnings += 'ERROR: Input a value in the Well field.\n'
+            
+            if value[1] == 1: # if there's any warning that's an error (value[1] in dict entry is a 1, not a 0)
+                self.proceed_with_recording = False # cannot proceed with recording
+                
+        
+        self.filename_warnings.set(all_txt_warnings)
+
+        if self.proceed_with_recording: 
+            configure_button(self.button_record_video, state='active') 
+            configure_button(self.button_record_by_ttl, state='active')
+        else:                           
+            configure_button(self.button_record_video, state='disabled')
+            configure_button(self.button_record_by_ttl, state='disabled')
+        
+        if not self.protocol.trig.get():
+            configure_button(self.button_record_by_ttl, state='disabled')
+                
+        W2 = font.Font(family='TkDefaultFont' , size = 8)
+        length = W2.measure(self.data_folder.get())
+        if length > 400: self.label_data_folder.configure(anchor = 'e')
+        else:            self.label_data_folder.configure(anchor = 'w')
+
+        json_object = json.dumps({'platename':self.platename.get(), 
+                                  'day':self.day.get(), 
+                                  'experiment':self.experiment.get(), 
+                                  'well':self.well_string.get(), 
+                                  'experiment info':self.experiment_info.get(), 
+                                  'parent folder':self.parent_folder.get(),
+                                  'file tree generation':self.generate_file_tree.get()})
+        
+        with open(self.CONFIG_FILEHANDLING_FILEPATH,'w') as f:
+            f.write(json_object)
+    
+    def configure_file_handling(self):
+        
+        self.frame_file = tk.Frame(self.root)
+        # define base variables for file handling
+        
+        self.platename          = tk.StringVar(self.frame_file, 'PLT001')
+        self.day                = tk.StringVar(self.frame_file, 'd01')
+        self.experiment         = tk.StringVar(self.frame_file, "")
+        self.well_string        = tk.StringVar(self.frame_file, 'D4')
+        self.experiment_info    = tk.StringVar(self.frame_file, '')
+
+        self.parent_folder  = tk.StringVar(self.frame_file, self.DEFAULT_PARENT_FOLDER) # parent folder for experiment
+        self.generate_file_tree = tk.IntVar(self.frame_file, 1)
+
+
+        # load file configuration, if exists
+        if os.path.exists(self.CONFIG_FILEHANDLING_FILEPATH):
+            with open(self.CONFIG_FILEHANDLING_FILEPATH,'r') as f:
+                data = json.load(f)
+
+                self.platename.set(data['platename'])
+                self.day.set(data['day'])
+                self.experiment.set(data['experiment'])
+                self.well_string.set(data['well'])
+                self.experiment_info.set(data['experiment info'])
+
+                self.parent_folder.set(data['parent folder'])
+                self.generate_file_tree.set(data['file tree generation'])
+
+        self.day_and_experiment = ' - '.join(self.day.get())
+
+        # define entry for each string
+        configure_label(tk.Label(self.frame_file), "Plate: ", 8,           [0,   30, 100, 20], 'w')
+        configure_entry(tk.Entry(self.frame_file), self.platename,         [0,   50, 100, 25], 10)
+
+        configure_label(tk.Label(self.frame_file), "Day: ", 8,             [100, 30, 50,  20], 'w')
+        configure_entry(tk.Entry(self.frame_file), self.day,               [100, 50, 50,  25], 10)
+
+        configure_label(tk.Label(self.frame_file), "Experiment: ", 8,      [150, 30, 100, 20], 'w')
+        configure_entry(tk.Entry(self.frame_file), self.experiment,        [150, 50, 100, 25], 10)
+
+        configure_label(tk.Label(self.frame_file), "Well: ", 8,            [245, 30, 25,  20], 'w')
+        configure_entry(tk.Entry(self.frame_file), self.well_string,       [250, 50, 25,  25], 10)
+
+        configure_label(tk.Label(self.frame_file), "Info: ", 8,            [275, 30, 100, 20], 'w')
+        configure_entry(tk.Entry(self.frame_file), self.experiment_info,   [275, 50, 100, 25], 10)
+        
+        # folder, subfolder, and filename string variables
+        self.data_folder    = tk.StringVar(self.frame_file, os.path.join(self.DEFAULT_PARENT_FOLDER, self.day.get(), self.platename.get()))
+        self.filename       = tk.StringVar(self.frame_file, '_'.join((self.platename.get(), self.day.get(), self.well_string.get(), self.experiment_info.get())))
+        self.full_filename  = tk.StringVar(self.frame_file, os.path.join(self.data_folder.get(), self.filename.get()))
+
+        # parent folder selection
+        configure_button(tk.Button(self.frame_file), "Project Folder", self.file_dialog, 10, [0, 0, 100, 25])
+        self.label_data_folder = configure_label(tk.Label(self.frame_file), '', 8,   [100, 0, 400, 25], anchor = 'e', textvariable=self.data_folder)
+        
+        configure_label(tk.Label(self.frame_file), '', 10,  [0, 75, 500, 25], 'w', textvariable=self.filename)
+
+        self.filename_warnings = tk.StringVar(self.frame_file, '')
+        configure_label(tk.Label(self.frame_file), '', 10,  [0, 100, 500, 200], 'nw', textvariable=self.filename_warnings, justify=tk.LEFT)
+        # self.plate_dropdown = tk.OptionMenu(self.root, self.plate_name_var, *self.available_plates, command=self.update_filename)
+        # self.plate_dropdown.pack()
+
+
+        # self.entry_filename = configure_entry(tk.Entry(self.file_frame), self.full_filename, [75, 0, 200, 25], fontsize=8, state=tk.DISABLED, justify=tk.RIGHT)
+        # configure_label(tk.Label(self.frame_initialization), 'Well: ', location=[0, 105, 150, 25], fontsize=10,anchor='w')
+        # configure_entry(tk.Entry(self.frame_file), self.plate_name_var,                      [0,25,100,25], 10, bind_function = ('<KeyRelease>',self.update_filename))
+        # configure_entry(tk.Entry(self.frame_file), self.well_var,                            [100,25,25,25], 10, bind_function = ('<KeyRelease>',self.update_filename))
+        # configure_entry(tk.Entry(self.frame_file), self.experiment_info_var,                 [125,25,150,25], 10, bind_function = ('<KeyRelease>',self.update_filename))
+
+        self.check_generate_file_tree = tk.Checkbutton(self.frame_file, 
+                                                       text='Generate Folder\nStructure', 
+                                                       variable=self.generate_file_tree, 
+                                                       onvalue=1, 
+                                                       offvalue = 0, 
+                                                       command = self.update_filename, 
+                                                       bg='white')
+        self.check_generate_file_tree.place(x=375, y=25)
+        self.update_filename(1)
+
+
+        self.platename.trace_add('write',self.update_filename)
+        self.day.trace_add('write',self.update_filename)
+        self.experiment.trace_add('write',self.update_filename)
+        self.well_string.trace_add('write',self.update_filename)
+        self.experiment_info.trace_add('write',self.update_filename)
+        self.parent_folder.trace_add('write',self.update_filename)
+        self.generate_file_tree.trace_add('write',self.update_filename)
+        
+        # configure_label(tk.Label(self.frame_initialization), "Plate: ", location=[0,155,150, 25], fontsize=10, anchor='w')
+        # configure_entry(tk.Entry(self.frame_initialization), self.plate_name_var, [0,180,150,25], 10)
+        
+        self.frame_file.configure({  'background':'white', 
+                                        'borderwidth':0,
+                                        'relief':'groove', 
+                                        })
+
+    def toggle_video_by_ttl(self):
+        self.running_processing = not self.running_processing
+        # self.recording = not self.recording
+        string = "OMV,{}&REMOVEPROCESSING\n".format(self.well_motor)
+        self.monitor_ttl_for_recording = not self.monitor_ttl_for_recording
+        configure_button(self.button_record_by_ttl, 
+                              'Waiting\nfor TTL...' if self.monitor_ttl_for_recording else 'Record\nBy TTL', 
+                              borderwidth = 4       if self.monitor_ttl_for_recording else 2) # configure button to 
+
+        # print(self.data_folder_exists)
+        if not os.path.exists(self.data_folder):
+            try: 
+                os.makedirs(self.data_folder.get(), exist_ok=True)
+                self.data_folder_exists = True
+            except PermissionError: 
+                print("PERMISSION DENIED IN CREATING DATA FOLDER {}.".format(self.data_folder.get()))
+                self.protocol_log[self.protocol_log_idx] = 'data folder error'
+                self.protocol_log_idx += 1
+                self.display_protocol_log()
+                self.recording = False
+                configure_button(self.button_record_by_ttl, 
+                              'Waiting\nfor TTL...' if self.recording else 'Record\nBy TTL', 
+                              borderwidth = 4 if self.recording else 2) # configure button to 
+                
+        if self.data_folder_exists and self.recording:
+            self.protocol_log[self.protocol_log_idx] = 'data folder created'
+            self.protocol_log_idx += 1
+            self.display_protocol_log()
+
+    def begin_ttl_recording(self):
+        if self.monitor_ttl_for_recording:
+            self.got_ttl = False # turn off flag for getting at ttl
+            self.recording = True # turn on recording flag
+            self.time_start_recording = time() # begin recording timer
+            self.recording_time = 2.5 # seconds
+            configure_button(self.button_record_by_ttl, 'Recording', borderwidth=5)
+            self.time_of_recording = datetime.today().strftime("%Y%m%d_%H%M%S") # timestamp
+            self.video_filename = '{}_videocapture_{}_{}.avi'.format(self.full_filename.get(), self.n_ttl, self.time_of_recording)
+            self.txt_filename = "{}_video_information_{}_{}.txt".format(self.full_filename.get(), self.n_ttl, self.time_of_recording)
+
+            if not os.path.exists(self.data_folder.get()):
+                os.makedirs(self.data_folder.get())
+            with open(self.txt_filename, 'w') as f:
+                f.write('global time (ms),well,motor time (ms),motor position (steps),max distance (steps),cycle count,TrigMode,TRIG,post X (px),post Y (px), stretch (%), magnet X (px), magnet Y(px)\n')
+            print(self.video_filename)
+            self.videowriter =  cv2.VideoWriter(self.video_filename, 
+                                cv2.VideoWriter_fourcc('I','4','2','0'),
+                                self.frame_rate, self.image_size)
+
+    def toggle_video_recording(self):
+        self.running_processing = not self.running_processing
+        self.recording = not self.recording
+        string = "OMV,{}&REMOVEPROCESSING\n".format(self.well_motor)
+        print(self.recording)
+        configure_button(self.button_record_video, 
+                                        'Recording' if self.recording else 'Record\nContinuous',
+                         borderwidth =  5           if self.recording else 2)
+        
+        if not os.path.exists(self.data_folder.get()):
+            try: 
+                os.makedirs(self.data_folder.get(), exist_ok=True)
+                self.data_folder_exists = True
+            except PermissionError: 
+                print("PERMISSION DENIED IN CREATING DATA FOLDER {}.".format(self.data_folder.get()))
+                self.protocol_log[self.protocol_log_idx] = 'data folder error'
+                self.protocol_log_idx += 1
+                self.display_protocol_log()
+                self.recording = False
+                configure_button(self.button_record_video, 
+                                        'Recording'         if self.recording else 'Record\nContinuous',
+                                        borderwidth =  5    if self.recording else 2)
+                
+        if self.recording:
+            self.time_of_recording = datetime.today().strftime("%Y%m%d_%H%M%S")
+            self.video_filename = '{}_videocapture_{}.avi'.format(self.full_filename.get(), self.time_of_recording)
+            self.txt_filename = "{}_video_information_{}.txt".format(self.full_filename.get(), self.time_of_recording)
+            self.videowriter = cv2.VideoWriter(self.video_filename, 
+                         cv2.VideoWriter_fourcc('I','4','2','0'),
+                         self.frame_rate, self.image_size)
+            with open(self.txt_filename, 'w') as f:
+                f.write('global time (ms),well,motor time (ms),motor position (steps),max distance (steps),cycle count,TrigMode,TRIG,post X (px),post Y (px), stretch (%), magnet X (px), magnet Y(px)\n')
+        
+        else:
+            if self.videowriter is not None:
+                try:    self.videowriter.release()
+                except: pass
+                self.videowriter = None
+            
+
+        self.write_to_motors(string)
+   
     def configure_protocol_frame(self):
         self.protocol_frame = tk.Frame(self.root)
+        
+        configure_label(tk.Label(self.protocol_frame), 'PROTOCOL', 12, [0, 0, 400, 30], anchor='c')
+        
+        self.protocol = Protocol(self.protocol_frame)
+
+        if os.path.exists(self.CONFIG_PROTOCOL_FILEPATH):
+            with open(self.CONFIG_PROTOCOL_FILEPATH,'r') as f:
+                data = json.load(f)
+                # print(data)
+                self.protocol.update(steps          = data['steps'],
+                                     pre_delay      = data['pre_delay'],
+                                     rise           = data['rise'],
+                                     hold           = data['hold'],
+                                     fall           = data['fall'],
+                                     post_delay     = data['post_delay'],
+                                     n_cycles       = data['n_cycles'],
+                                     trig           = data['trig'],
+                                     assigned_to    = data['assigned_to'])
+                
+
+        self.speed_rise_var = tk.StringVar(self.protocol_frame, '{} steps/s'.format(self.motors[self.well_motor].speed_rise))
+        self.speed_fall_var = tk.StringVar(self.protocol_frame, '{} steps/s'.format(self.motors[self.well_motor].speed_fall))
+        
+        self.t = np.cumsum([0, self.protocol.pre_delay.get(), self.protocol.rise.get(),  self.protocol.hold.get(),  self.protocol.fall.get(), self.protocol.post_delay.get()])
+        self.d =           [0, 0,                             self.protocol.steps.get(), self.protocol.steps.get(), 0,                        0]
+        
+        self.entry_steps      = configure_entry(tk.Entry(self.protocol_frame), self.protocol.steps,         [200, 30, 50, 25])
+        self.entry_pre_delay  = configure_entry(tk.Entry(self.protocol_frame), self.protocol.pre_delay,     [200, 55, 50, 25])
+        self.entry_rise       = configure_entry(tk.Entry(self.protocol_frame), self.protocol.rise,          [200, 80, 50, 25])
+        self.entry_hold       = configure_entry(tk.Entry(self.protocol_frame), self.protocol.hold,          [200, 105, 50, 25])
+        self.entry_fall       = configure_entry(tk.Entry(self.protocol_frame), self.protocol.fall,          [200, 130, 50, 25])
+        self.entry_post_delay = configure_entry(tk.Entry(self.protocol_frame), self.protocol.post_delay,    [200, 155, 50, 25])
+        self.entry_n_cycles   = configure_entry(tk.Entry(self.protocol_frame), self.protocol.n_cycles,      [200, 180, 50, 25])
+
+        configure_label(tk.Label(self.protocol_frame), 'motor distance (steps):',     10, [0, 30, 200, 25], anchor='e')
+        configure_label(tk.Label(self.protocol_frame), 'pre-stretch delay (ms):',     10, [0, 55, 200, 25], anchor='e') 
+        configure_label(tk.Label(self.protocol_frame), 'stretch duration (ms):',      10, [0, 80, 200, 25], anchor='e')
+        configure_label(tk.Label(self.protocol_frame), 'hold duration (ms):',         10, [0, 105, 200, 25], anchor='e')
+        configure_label(tk.Label(self.protocol_frame), '>=100 ms',                     10, [250, 105, 200, 25], anchor='w')
+        configure_label(tk.Label(self.protocol_frame), 'un-stretch duration (ms):',   10, [0, 130, 200, 25], anchor='e')
+        configure_label(tk.Label(self.protocol_frame), 'rest duration (ms):',         10, [0, 155, 200, 25], anchor='e')
+        configure_label(tk.Label(self.protocol_frame), '>=100 ms',                     10, [250, 155, 200, 25], anchor='w')
+        configure_label(tk.Label(self.protocol_frame), 'N cycles (-1 for inf):',      10, [0, 180, 200, 25], anchor='e')
+        
+        tk.Checkbutton(self.protocol_frame, 
+                       text         = 'External\nTrigger', 
+                       variable     = self.protocol.trig, 
+                       onvalue      = 1, 
+                       offvalue     = 0, 
+                       bg           = 'white').place(x=260, y=180)
+        
+        
+        
+        configure_label(tk.Label(self.protocol_frame), "Assign to:", 11, [0, 250, 125, 25], 'e' )
         self.protocol_buttons = [tk.Button(self.protocol_frame), tk.Button(self.protocol_frame), tk.Button(self.protocol_frame), tk.Button(self.protocol_frame)]
         self.protocol_assigned_to_motors = [              False,                          False,                          False,                          False]
-        self.configure_label(tk.Label(self.protocol_frame), 'PROTOCOL', 14, [0, 0, 175, 30])
-
-        self.var_distance = tk.StringVar(self.protocol_frame,300)
-        self.var_pre_stretch_delay = tk.StringVar(self.protocol_frame,0)
-        self.var_stretch_duration = tk.StringVar(self.protocol_frame,500)
-        self.var_hold_duration = tk.StringVar(self.protocol_frame,100)
-        self.var_fall_duration = tk.StringVar(self.protocol_frame, 500)
-        self.var_rest_duration = tk.StringVar(self.protocol_frame, 3000)
-        self.var_n_cycles = tk.StringVar(self.protocol_frame, 1)
-
-        self.configure_label(tk.Label(self.protocol_frame), 'Motor distance (steps): ', 12, [0, 30, 200, 25], anchor='e')
-        self.configure_label(tk.Label(self.protocol_frame), 'pre-stretch delay (ms): ', 12, [0, 55, 200, 25], anchor='e') #, self.configure_label(tk.Label(self.protocol_frame), '>=100', 10, [250, 55, 200, 25], anchor='w')
-        self.configure_label(tk.Label(self.protocol_frame), 'stretch duration (ms): ', 12, [0, 80, 200, 25], anchor='e')
-        self.configure_label(tk.Label(self.protocol_frame), 'hold duration (ms): ', 12, [0, 105, 200, 25], anchor='e'), self.configure_label(tk.Label(self.protocol_frame), '>=100', 10, [250, 105, 200, 25], anchor='w')
-        self.configure_label(tk.Label(self.protocol_frame), 'un-stretch duration (ms): ', 12, [0, 130, 200, 25], anchor='e')
-        self.configure_label(tk.Label(self.protocol_frame), 'rest duration (ms): ', 12, [0, 155, 200, 25], anchor='e'), self.configure_label(tk.Label(self.protocol_frame), '>=100', 10, [250, 155, 200, 25], anchor='w')
-        self.configure_label(tk.Label(self.protocol_frame), 'N cycles (-1 for inf): ', 12, [0, 180, 200, 25], anchor='e')
         
-        self.label_speed_rise = self.configure_label(tk.Label(self.protocol_frame), "speed = {} steps/s".format(self.motors[self.well_motor].speed_rise), 10, [250, 80, 200, 25], anchor='w')
-        self.label_speed_fall = self.configure_label(tk.Label(self.protocol_frame), "speed = {} steps/s".format(self.motors[self.well_motor].speed_fall), 10, [250, 130, 200, 25], anchor='w')
-
-        self.entry_distance = self.configure_entry(tk.Entry(self.protocol_frame), self.var_distance, [200, 30, 50, 25])
-        self.entry_pre_stretch_delay = self.configure_entry(tk.Entry(self.protocol_frame), self.var_pre_stretch_delay, [200, 55, 50, 25])
-        self.entry_stretch_duration = self.configure_entry(tk.Entry(self.protocol_frame), self.var_stretch_duration, [200, 80, 50, 25])
-        self.entry_hold_duration = self.configure_entry(tk.Entry(self.protocol_frame), self.var_hold_duration, [200, 105, 50, 25])
-        self.entry_fall_duration = self.configure_entry(tk.Entry(self.protocol_frame), self.var_fall_duration, [200, 130, 50, 25])
-        self.entry_rest_duration = self.configure_entry(tk.Entry(self.protocol_frame), self.var_rest_duration, [200, 155, 50, 25])
-        self.entry_n_cycles = self.configure_entry(tk.Entry(self.protocol_frame), self.var_n_cycles, [200, 180, 50, 25])
+        # self.button_trig_toggle = configure_button(tk.Button(self.protocol_frame), "External\ntrigger", toggleExtTrig, 10, [260, 180, 60, 40])
+        # self.button_save_protocol  = configure_button(tk.Button(self.protocol_frame), 'Save', self.save_protocol, 12, [250, 220, 60, 25])
 
         
-        def toggleExtTrig():
-            self.EXTERNAL_TRIGGER_FLAG = not self.EXTERNAL_TRIGGER_FLAG
-
-            if self.EXTERNAL_TRIGGER_FLAG:
-                self.button_trig_toggle.configure(borderwidth=5)
-            else:
-                self.button_trig_toggle.configure(borderwidth=2)
-            pass
-        self.button_trig_toggle = self.configure_button(tk.Button(self.protocol_frame), "External\ntrigger", toggleExtTrig, 10, [260, 180, 60, 40])
-        self.button_check_protocol = self.configure_button(tk.Button(self.protocol_frame), 'Verify Protocol', self.verify_protocol, 12, [100, 220, 150, 25])
-        # self.button_save_protocol  = self.configure_button(tk.Button(self.protocol_frame), 'Save', self.save_protocol, 12, [250, 220, 60, 25])
-
-        self.configure_label(tk.Label(self.protocol_frame), "Assign to:", 11, [0, 250, 125, 25], 'e' )
         for i in range(4):
             self.protocol_buttons[i] = tk.Button(self.protocol_frame)
             def send_protocol(motor=i):
-                temp = int(self.var_n_cycles.get())
+                
+                temp = int(self.protocol.n_cycles.get())
 
                 string = "PROTOCOL{well},{distance},{pre_stretch_delay},{stretch_duration},{hold_duration},{fall_duration},{rest_duration},{n_cycles},{trig}\n".format(
                     well=motor,
-                    distance=int(self.var_distance.get()),
-                    pre_stretch_delay = int(self.var_pre_stretch_delay.get()),
-                    stretch_duration = int(self.var_stretch_duration.get()),
-                    hold_duration = int(self.var_hold_duration.get()),
-                    fall_duration = int(self.var_fall_duration.get()),
-                    rest_duration = int(self.var_rest_duration.get()),
-                    n_cycles = temp,
-                    trig = int(self.EXTERNAL_TRIGGER_FLAG))
-            
-                self.update_protocol_display()
+                    distance =              self.protocol.steps.get(),     
+                    pre_stretch_delay =     self.protocol.pre_delay.get(),
+                    stretch_duration =      self.protocol.rise.get()      ,
+                    hold_duration =         self.protocol.hold.get()      ,
+                    fall_duration =         self.protocol.fall.get()      ,
+                    rest_duration =         self.protocol.post_delay.get(),
+                    n_cycles                = temp,
+                    trig =                  self.protocol.trig.get() )
+                    
                 if self.passed_check_protocol:
-                    self.motors[motor].assigned_protocol = not self.motors[motor].assigned_protocol
-                    if self.motors[motor].assigned_protocol:
-                        self.protocol_buttons[motor].configure(borderwidth=2)
-                        self.protocol_assigned_to_motors[motor] = False
-                        self.protocol.assigned_to[motor] = False
-                        # self.write_to_motors(string)
-                        self.protocol_display_message += 'Unassigned to Row {}.\n'.format(self.well_labels[motor])
-                        self.update_protocol_display()
+                    self.protocol.assigned_to[motor] = not self.protocol.assigned_to[motor]
+                    self.update_motor_assignment()
+                    if 'send protocol' not in self.protocol_log.values():
+                        self.protocol_log[self.protocol_log_idx] = 'send protocol'
+                        self.protocol_log_idx += 1
+                    self.display_protocol_log()
+                    if self.protocol.assigned_to[motor]: self.write_to_motors(string)
+
+                    # self.motors[motor].assigned_protocol = not self.motors[motor].assigned_protocol
+                    # if self.motors[motor].assigned_protocol:
+                    #     self.protocol_buttons[motor].configure(borderwidth=2)
+                    #     self.protocol.assigned_to[motor] = False
 
 
-                    else:
-                        self.protocol_buttons[motor].configure(borderwidth=5)
-                        self.protocol_assigned_to_motors[motor] = True
-                        self.write_to_motors(string)
-                        self.protocol_display_message += 'Assigned to Row {}.\n'.format(self.well_labels[motor])
-                        self.update_protocol_display()
-                        self.protocol.assigned_to[motor] = True
+                    # else:
+                    #     self.protocol_buttons[motor].configure(borderwidth=5)
+                    #     self.protocol.assigned_to[motor] = True
+                    #     self.write_to_motors(string)
 
-                    # self.protocol_display.configure(text='Sent to Row {well}'.format(self.well_labels[self.well_motor]))
+                
+                    
                 else:
-                    self.protocol_display_message = "Please verify protocol."
-                    self.update_protocol_display()
+                    if 'send protocol error' not in self.protocol_log.values():
+                        self.protocol_log[self.protocol_log_idx] = 'send protocol error'
+                        self.protocol_log_idx += 1
+                        self.display_protocol_log()
                     pass
                 pass
-            self.configure_button(self.protocol_buttons[i],self.well_labels[i], send_protocol, 12, [200-(i*25), 250, 25, 25])
+            
+            configure_button(self.protocol_buttons[i],self.well_labels[i], send_protocol, 12, [200-(i*25), 250, 25, 25])
 
-        self.button_begin_protocols = self.configure_button(tk.Button(self.protocol_frame), "Start Protocol", self.begin_protocol, 14, [100, 280, 150, 30])
+        self.button_begin_protocols = configure_button(tk.Button(self.protocol_frame), "Start Protocol", self.begin_protocol, 12, [100, 280, 150, 25])
 
-        self.label_protocol_begin = self.configure_label(tk.Label(self.protocol_frame), "", 10, [250, 280, 150, 70], anchor='nw')
+        self.button_save_protocol   = configure_button(tk.Button(self.protocol_frame),"Save", self.save_protocol, 12, [175, 220, 50, 25])
+        self.button_load_protocol   = configure_button(tk.Button(self.protocol_frame),"Load", self.load_protocol, 12, [125, 220, 50, 25])
+        
+        
+        self.label_protocol_begin = configure_label(tk.Label(self.protocol_frame), "", 10, [250, 280, 150, 70], anchor='nw')
+        
+        self.protocol_display = configure_label(tk.Label(self.protocol_frame), "", 12, [350, 200, 500, 300], anchor='nw', justify=tk.LEFT)
 
-        self.protocol_display = self.configure_label(tk.Label(self.protocol_frame), "", 12, [0, 310, 500, 300], anchor='nw', justify=tk.LEFT)
+        # add plot canvas
+        # self.fig, ax = plt.subplots(1,1)
+        # self.fig.set_size_inches(1, 0.5)
+        
+        self.fig = Figure(figsize=(4,2), dpi=100)
+        self.fig.subplots_adjust(left=0, bottom=0.15)
+        self.ax = self.fig.gca()
+        self.protocol_lines = self.ax.plot(self.t, self.d)
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        self.ax.set_xticks(np.unique(self.t))
+        self.ax.set_yticks(np.unique(self.d))
+        self.ax.set_xticklabels([])
+
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.protocol_frame)  # A tk.DrawingArea.
+        self.canvas.draw()
+        
+
+        self.canvas.get_tk_widget().place(x=350, y=0, width=500, height=200)
+        # self.canvas.get_tk_widget().pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
 
         self.protocol_frame.configure({'background':'white', 
                                         'borderwidth':0,
                                         'relief':'groove', 
-                                        'width':500, 
+                                        'width':1000, 
                                         'height':500})
-        self.protocol_frame.place(bordermode=tk.OUTSIDE, x=500, y=10)
+        
+        
+        self.protocol.pre_delay.        trace_add('write',self.change_protocol)
+        self.protocol.rise.             trace_add('write',self.change_protocol)
+        self.protocol.hold.             trace_add('write',self.change_protocol)
+        self.protocol.fall.             trace_add('write',self.change_protocol)
+        self.protocol.post_delay.       trace_add('write',self.change_protocol)
+        self.protocol.steps.            trace_add('write',self.change_protocol)
+        self.protocol.n_cycles.         trace_add('write',self.change_protocol)
+        self.protocol.trig.             trace_add('write',self.change_protocol)
 
+        self.change_protocol()
+
+    def save_protocol(self, *args):
+        if self.passed_check_protocol:
+            self.protocol_log = {}
+            self.protocol_log_idx = 0
+            self.save_protocol_filename = asksaveasfilename(defaultextension='json')
+            if len(self.save_protocol_filename) > 0:
+                json_object = json.dumps({
+                        'steps':        self.protocol.steps        .get(),
+                        'pre_delay':    self.protocol.pre_delay    .get(),
+                        'rise':         self.protocol.rise         .get(),
+                        'hold':         self.protocol.hold         .get(),
+                        'fall':         self.protocol.fall         .get(),
+                        'post_delay':   self.protocol.post_delay   .get(),
+                        'n_cycles':     self.protocol.n_cycles     .get(),
+                        'trig':         self.protocol.trig         .get(),
+                        'assigned_to':  self.protocol.assigned_to
+                        })
+
+                with open(self.save_protocol_filename,'w') as f:
+                    f.write(json_object)
+
+            self.protocol_log[self.protocol_log_idx] = 'save protocol'
+            self.protocol_log_idx += 1
+
+            self.display_protocol_log()
+        else:
+            if 'save protocol error' not in self.protocol_log.values():
+                self.protocol_log[self.protocol_log_idx] = 'save protocol error'
+                self.protocol_log_idx += 1
+                self.display_protocol_log()
+
+    def load_protocol(self, *args):
+
+        self.open_protocol_filename = askopenfilename(filetypes = [('JSON','*.json')])
+        self.protocol_log = {}
+        self.protocol_log_idx = 0
+        if os.path.exists(self.open_protocol_filename):
+            with open(self.open_protocol_filename,'r') as f:
+                data = json.load(f)
+                if set(['steps','pre_delay','rise','hold','fall','post_delay','n_cycles','trig','assigned_to']).issubset(set(data.keys())):
+                    # print(data)
+                    self.protocol.update(steps          = data['steps'],
+                                        pre_delay      = data['pre_delay'],
+                                        rise           = data['rise'],
+                                        hold           = data['hold'],
+                                        fall           = data['fall'],
+                                        post_delay     = data['post_delay'],
+                                        n_cycles       = data['n_cycles'],
+                                        trig           = data['trig'],
+                                        assigned_to    = data['assigned_to'])
+                    
+                    self.protocol_log[self.protocol_log_idx] = 'load protocol'
+                    self.protocol_log_idx += 1
+                    self.display_protocol_log()
+                else:
+                    self.protocol_log[self.protocol_log_idx] = 'load protocol error'
+                    self.protocol_log_idx += 1
+                    self.display_protocol_log()
+
+        pass
+
+    def change_protocol(self, *args):
+
+        self.protocol.assigned_to = [False] * 4
+        self.update_motor_assignment(self)
+        self.protocol_log = {}
+        self.protocol_log_idx = 0
+        self.verify_protocol(self)
+        # self.update_plot(self)
+
+        configure_button(self.button_record_by_ttl, state = 'active' if self.protocol.trig.get() else 'disabled')
+        
+        self.display_protocol_log(self)
+
+    def update_motor_assignment(self, *args):
+        for i in range(4):
+            self.protocol_buttons[i].configure(borderwidth = 5 if self.protocol.assigned_to[i] else 2)
+
+    def verify_protocol(self, *args):
+        try:
+            pre_delay       = int(self.protocol.pre_delay   .get())
+            rise            = int(self.protocol.rise        .get())
+            hold            = int(self.protocol.hold        .get())
+            fall            = int(self.protocol.fall        .get())
+            post_delay      = int(self.protocol.post_delay  .get())
+            steps           = int(self.protocol.steps       .get())
+            n_cycles        = int(self.protocol.n_cycles    .get())
+            trig            = int(self.protocol.trig        .get())
+            self.passed_check_protocol = True
+            
+        except:
+            self.passed_check_protocol = False
+            self.protocol_log[self.protocol_log_idx] = 'failed to get numbers'
+            self.protocol_log_idx += 1
+            return
+        
+        if steps > 2000:
+            self.protocol_log[self.protocol_log_idx] = 'steps too large'
+            self.passed_check_protocol = False
+            self.protocol_log_idx += 1
+
+        if hold < 100 or pre_delay < 100 or post_delay < 100:
+            self.protocol_log[self.protocol_log_idx] = 'delay too small'
+            self.passed_check_protocol = False
+            self.protocol_log_idx += 1
+        
+        if n_cycles == 0 or n_cycles < -1:
+            self.protocol_log[self.protocol_log_idx] = 'n cycles not valid'
+            self.passed_check_protocol = False
+            self.protocol_log_idx += 1
+        
+        speed_rise = steps/(rise/1000)
+        speed_fall = steps/(fall/1000)
+
+        self.speed_rise_var.set("{} steps/s".format(int(speed_rise)))
+        self.speed_fall_var.set("{} steps/s".format(int(speed_fall)))
+
+        if speed_rise > 2000 or speed_fall > 2000:
+            self.protocol_log[self.protocol_log_idx] = 'speed too large'
+            self.passed_check_protocol = False
+            self.protocol_log_idx += 1
+        
+        if self.passed_check_protocol:
+            json_object = json.dumps({
+                'steps':        self.protocol.steps        .get(),
+                'pre_delay':    self.protocol.pre_delay    .get(),
+                'rise':         self.protocol.rise         .get(),
+                'hold':         self.protocol.hold         .get(),
+                'fall':         self.protocol.fall         .get(),
+                'post_delay':   self.protocol.post_delay   .get(),
+                'n_cycles':     self.protocol.n_cycles     .get(),
+                'trig':         self.protocol.trig         .get(),
+                'assigned_to':  self.protocol.assigned_to
+                })
+
+            with open(self.CONFIG_PROTOCOL_FILEPATH,'w') as f:
+                f.write(json_object)
+            
+    def update_protocol_display(self):
+        if self.message.count('\n') > 8:
+            self.message = self.message[(self.message.index('\n')+1):]
+        # print(self.message)
+        self.protocol_display.configure(text=self.message)
+        pass
+
+    def display_protocol_log(self, *args):
+        self.message = ''
+        if 'load protocol error' in self.protocol_log.values():
+            self.message += 'Cannot load protocol in {}.\n'.format(Path(self.open_protocol_filename).name)
+        
+        if self.passed_check_protocol == False:
+            self.message += 'Invalid Protocol.\n'
+
+            for value in self.protocol_log.values():
+                # print(value)
+                if value == 'Failed to get numbers':
+                    self.message += ' - Invalid Entries.\n'
+                    break
+                if value == 'steps too large':
+                    self.message += ' - Distance (steps) too large.  Limit is 2000 steps.\n'
+                if value == 'speed too large':
+                    self.message += ' - Speed too large.  Limit is 2000 steps/s.\n'
+                    # print(self.message)
+                if value == 'delay too small':
+                    self.message += ' - Pre-delay, post-delay, or hold duration must be >100 ms.\n'
+                if value == 'n cycles not valid':
+                    self.message += ' - N cycles must be >= 1 or -1 (for inf).\n'
+                
+                if value == 'send protocol error':
+                    self.message += ' - Cannot send invalid protocol to motor.\n'
+                if value == 'save protocol error':
+                    self.message += ' - Cannot save invalid protocol.\n'
+
+        if self.passed_check_protocol:
+            if 'load protocol' in self.protocol_log.values():
+                self.message += 'Protocol Loaded from {}.\n'.format(Path(self.open_protocol_filename).name)
+            else:
+                self.message += 'Valid Protocol.\n'
+            self.message += ' - Total duration is {} ms.\n'.format(self.t[-1])
+            self.message += ' - Stretch duration is {} ms.\n'.format(self.t[4] - self.t[1])
+
+            if self.protocol.trig.get():
+                if self.protocol.n_cycles.get() == 1:       self.message += ' - External Trigger. One stretch per trig.\n'
+                else:                                       self.message += ' - External Trigger. WARNING: More than one stretch per trig.\n'
+            else:
+                if self.protocol.n_cycles.get() == 1:       self.message += ' - Open Loop. One cycle.\n'
+                else:
+                    if self.protocol.n_cycles.get() == -1:  self.message += ' - Open Loop. Inf cycles.\n'
+                    else:                                   self.message += ' - Open Loop. {} cycles.\n'.format(self.protocol.n_cycles.get())
+
+            for value in self.protocol_log.values():
+                if value == 'send protocol':
+                    self.message += ' - Active Wells: ' + ', '.join(np.flip(np.array(self.well_labels)[self.protocol.assigned_to]))
+                if value == 'save protocol':
+                    self.message += ' - Saved protocol to {}.\n'.format(Path(self.save_protocol_filename).name)
+                if value == 'data folder error':
+                    self.message += ' ERROR - cannot create data folder.\n'
+                if value == 'data folder created':
+                    self.message += ' - Saving data to {}\n'.format('../' + '/'.join(self.data_folder.get().split('\\')[-2:]))
+
+        self.update_protocol_display()
+        pass
+    
+    def update_plot(self,*args):
+        try: self.t = np.cumsum([0, self.protocol.pre_delay.get(), self.protocol.rise.get(), self.protocol.hold.get(), self.protocol.fall.get(), self.protocol.post_delay.get()])
+        except: pass
+        
+        try: self.d = [0, 0, self.protocol.steps.get(), self.protocol.steps.get(), 0, 0]
+        except: pass
+        # self.fig.gca().clear()
+        print(self.protocol_lines)
+        self.protocol_lines[0].xdata = self.t
+        self.protocol_lines[0].ydata = self.d
+        
+        ticks = np.unique(self.t)
+        self.ax.set_xticks(ticks)
+        labels = ['']*len(ticks)
+        labels[-1] = str(self.t[-1])
+        self.fig.gca().set_xticklabels(labels, fontsize=10)
+        self.fig.gca().set_yticks(np.unique(self.d))
+        self.fig.gca().set_yticklabels(np.unique(self.d), fontsize=10)
+        # print(self.entry_steps.get())
+        
+        self.canvas.draw()
+        if self.passed_check_protocol:
+            RotationAwareAnnotation(s=self.speed_rise_var.get(), xy=(self.t[1], 0),                         p = (self.t[2], self.protocol.steps.get()), ax = self.fig.gca(), fontsize=10)
+            RotationAwareAnnotation(s=self.speed_fall_var.get(), xy=(self.t[3], self.protocol.steps.get()), p = (self.t[4], 0),                         ax = self.fig.gca(), fontsize=10)
+
+        if self.motors[self.well_motor].homed:
+            pass
+            self.fig.gca().axvline(self.motors[self.well_motor].t, linewidth=3, color='r')
+        self.canvas.draw()
+    
     def begin_protocol(self):
-        string = "E{}{}{}{}\n".format(int(self.protocol_assigned_to_motors[0]),
-                                      int(self.protocol_assigned_to_motors[1]),
-                                      int(self.protocol_assigned_to_motors[2]),
-                                      int(self.protocol_assigned_to_motors[3]))
+        string = "E{}{}{}{}\n".format(int(self.protocol.assigned_to[0]),
+                                      int(self.protocol.assigned_to[1]),
+                                      int(self.protocol.assigned_to[2]),
+                                      int(self.protocol.assigned_to[3]))
         self.write_to_motors(string)
 
         self.root.after(1)
@@ -471,10 +966,10 @@ class CS3D:
         for i in range(4):
             enabled[i] = self.motors[i].enabled
         
-        print(enabled)
-        print(self.protocol_assigned_to_motors)
+        # print(enabled)
+        # print(self.protocol.assigned_to)
         
-        if enabled == self.protocol_assigned_to_motors:
+        if enabled == self.protocol.assigned_to:
             self.protocol_running = False
         else:
             self.protocol_running = True
@@ -488,112 +983,7 @@ class CS3D:
             self.button_begin_protocols.configure(text='Start Protocol', borderwidth=2)
             
         pass
-    def update_protocol_display(self):
-        if self.protocol_display_message.count('\n') > 8:
-            self.protocol_display_message = self.protocol_display_message[(self.protocol_display_message.index('\n')+1):]
 
-        self.protocol_display.configure(text=self.protocol_display_message)
-        pass
-
-    def verify_protocol(self):
-        self.protocol_display_message = ''
-        self.passed_check_protocol = True
-        try:
-            distance = int(self.var_distance.get())
-            pre_stretch_delay = int(self.var_pre_stretch_delay.get())
-            stretch_duration = int(self.var_stretch_duration.get())
-            hold_duration = int(self.var_hold_duration.get())
-            fall_duration = int(self.var_fall_duration.get())
-            rest_duration = int(self.var_rest_duration.get())
-            n_cycles = int(self.var_n_cycles.get())
-        except:
-            self.passed_check_protocol = False
-            self.protocol_display_message += 'Cannot get number from above.  Check values.'
-            self.update_protocol_display()
-            return
-        
-        
-        # if distance/stretch_duration > 4:
-        #     self.passed_check_protocol = False
-        #     self.protocol_display_message += '- stretch motor speed too large (>4000 steps/s)\n'
-        #     self.protocol_display_message += '  - current speed = {} steps/s\n'.format(1000*distance/stretch_duration)
-        #     self.protocol_display_message += '  - reduce distance to {} steps, or\n  - increase duration to {} ms\n'.format(stretch_duration*4, distance/4)
-        # if distance/fall_duration > 4:
-        #     self.passed_check_protocol = False
-        #     self.protocol_display_message += '- unstretch motor speed too large (>4000 steps/s)\n'
-        #     self.protocol_display_message += '  - current speed = {} steps/s\n'.format(1000*distance/fall_duration)
-        #     self.protocol_display_message += '  - reduce distance to {} steps, or\n  - increase duration to {} ms\n'.format(fall_duration*4, distance/4)
-        
-        
-        # if pre_stretch_delay < 100:
-        #     self.passed_check_protocol = False
-        #     self.protocol_display_message += '- pre-stretch delay too small (< 100 ms)\n'
-        if hold_duration < 100:
-            self.passed_check_protocol = False
-            self.protocol_display_message += '- hold duration too small (< 100 ms)\n'
-        if rest_duration < 100:
-            self.passed_check_protocol = False
-            self.protocol_display_message += '- rest duration too small (< 100 ms)\n'
-        
-        if n_cycles < -1 or n_cycles == 0:
-            self.passed_check_protocol = False
-            self.protocol_display_message += '- number of cycles must be >=1 or -1 for inf\n'
-        
-        
-        if self.passed_check_protocol == True:
-            self.label_speed_rise.configure(text="speed = {} steps/s".format(1000*distance/stretch_duration))
-            self.label_speed_fall.configure(text="speed = {} steps/s".format(1000*distance/fall_duration))
-             
-            self.protocol_display_message += 'Okay to send.\n'
-            tot_duration = pre_stretch_delay + stretch_duration + hold_duration + fall_duration + rest_duration
-            tot_stretch_duration = stretch_duration + hold_duration + fall_duration
-            self.protocol_display_message += '- Approximate protocol duration: {} ms.\n'.format(tot_duration)
-            self.protocol_display_message += '- Approximate total stretch duration: {} ms.\n'.format(tot_stretch_duration)
-            self.protocol_display_message += '- Approximate frequency of stretching: {} Hz.\n'.format(round(1/float(tot_duration/1000),3))
-            if self.EXTERNAL_TRIGGER_FLAG:
-                if n_cycles == 1:
-                    self.protocol_display_message += '- External trigger. One stretch per trigger.\n'
-                else:
-                    if n_cycles == -1:
-                        n_cycles = 'inf'
-                    self.protocol_display_message += '- External trigger. \n   - WARNING: Number of stretching cycles = {}.\n'.format(n_cycles)
-                
-            else:
-                self.protocol_display_message += '- Open Loop. Number of cycles = {}.\n'.format(n_cycles)
-
-
-            for i in range(4):
-                self.protocol_assigned_to_motors[i] = False
-                self.protocol.assigned_to[i] = False
-                self.motors[i].assigned_protocol = True
-                self.protocol_buttons[i].configure(borderwidth=2)
-
-            self.protocol.distance = distance
-            self.protocol.pre_stretch_delay = pre_stretch_delay
-            self.protocol.stretch_duration = stretch_duration
-            self.protocol.hold_duration = hold_duration
-            self.protocol.unstretch_duration = fall_duration
-            self.protocol.rest_duration = rest_duration
-            self.protocol.n_cycles = n_cycles
-            self.protocol.ext_trig = self.EXTERNAL_TRIGGER_FLAG
-
-            
-            
-        self.update_protocol_display()
-        pass
-    
-    def save_protocol(self):
-        root2 = tk.Tk()
-        root2.withdraw()
-
-        savefilename = asksaveasfilename(initialdir=os.getcwd(),  defaultextension='.json')
-        print(savefilename)
-        if savefilename is None:
-            return
-        
-        
-
-        return
     def enable_motor_configuration(self, state='disabled'):
         if state == 'disabled':
             configuration = {   'state':'disabled', 
@@ -611,71 +1001,9 @@ class CS3D:
                                 'borderwidth':5,
                                 'text':'Stop'}
         return configuration
-    def configure_button(self, button, text=None, command=None, fontsize=None, location=None, **kwargs):
-        configuration = {'borderwidth':2, 'relief':'groove'}
-        if text != None:
-            configuration['text'] = text
-        if command != None:
-            configuration['command'] = command
-        if fontsize != None:
-            configuration['font'] = font.Font(size=fontsize)
-        for key, value in kwargs.items():
-            configuration[key] = value
-        button.configure(configuration)
-        if location != None:
-            x, y, width, height = tuple(location)
-            location_config = {}
-            if x != -1:      location_config['x'] = x
-            if y != -1:      location_config['y'] = y
-            if width != -1:  location_config['width'] = width
-            if height != -1: location_config['height'] = height
-            button.place(location_config)
-        return button
-    def configure_entry(self, entry, textvariable, location=None, fontsize=None):
-        configuration = {'textvariable':textvariable, 'background':'white', 'relief':'groove', 'borderwidth':2}
-        if fontsize != None:
-            configuration['font'] = font.Font(size=fontsize)
-        entry.configure(configuration)
-        if location != None:
-            x, y, width, height = tuple(location)
-            location_config = {}
-            if x != -1:      location_config['x'] = x
-            if y != -1:      location_config['y'] = y
-            if width != -1:  location_config['width'] = width
-            if height != -1: location_config['height'] = height
-            entry.place(location_config)
-        return entry
-    def configure_label(self, label, text, fontsize=None, location=None, anchor=None, **kwargs):
-        configuration = {'background':'white', 'text':text}
-        if fontsize!=None:
-            configuration['font'] = font.Font(size=fontsize)
-        if anchor!=None:
-            configuration['anchor'] = anchor
-            # label.configure(anchor='e')
-        for key, value in kwargs.items():
-            configuration[key] = value
-        label.configure(configuration)
-        if location!=None:
-            x, y, width, height = tuple(location)
-            location_config = {}
-            if x != -1:      location_config['x'] = x
-            if y != -1:      location_config['y'] = y
-            if width != -1:  location_config['width'] = width
-            if height != -1: location_config['height'] = height
-            
-            label.place(location_config)
-        return label
-    def update_waveform_dialog(self, values):
-        self.entry_rise.configure(textvariable=values[0])
-        self.entry_hold.configure(textvariable=values[1])
-        self.entry_fall.configure(textvariable=values[2])
-        self.entry_freq.configure(textvariable=values[3])
-        self.entry_stretch.configure(textvariable=values[4])
-        self.title_waveform_dialog.configure(text="Row {}".format(self.well_labels[self.waveform_motor]))
-        
     
     def update(self):
-        self.t = time() - self.t0
+        self.t1 = time() - self.t0
         # print(self.frame_rate)
         # print(round(time()-self.t0, 1))        
         # if self.waveform_root.winfo_viewable() == 1:
@@ -683,7 +1011,7 @@ class CS3D:
         # print(time() - self.t0)
 
         motor_info = self.get_motor_tx()
-
+        # print(motor_info)
         if motor_info != None:
             magic = self.extract_magic_number(motor_info)
             ret = self.decode_motor_information(motor_info, magic)
@@ -695,7 +1023,11 @@ class CS3D:
                 temp = " TTL"
             else:
                 temp = "OPEN"
-            printfunc("{}, trig: {}, n_TRIG: {}".format(temp, self.ttl_received, self.n_ttl), end='\r')
+
+            if len(self.last_framerates) > 30:
+                self.last_framerates.pop(0)
+            self.last_framerates.append(self.frame_rate)
+            printfunc("{}, trig: {}, stretch: {:3.2f}, frame_rate: {:3.1f}".format(temp, self.ttl_received, self.tracking_stretch, np.mean(self.last_framerates)), end='\r')
             # print(motor_info)
 
         if self.ports.connected_to_camera:
@@ -736,17 +1068,22 @@ class CS3D:
 
         self.do_pygame_events()
 
-         
+        if self.motors[self.well_motor].enabled:
+            # self.update_plot()
+            pass
             
         # pygame.draw.rect(screen, (255,0,0), rectangle)
              
             # pygame.draw.rect(screen, (255,255,255), pygame.rect.Rect(min(x1,x2), min(y1,y2), abs(x1-x2), abs(y1-y2)))
         
         t2 = time() - self.t0
-        if t2 > self.t:
-            self.frame_rate = 1/(t2-self.t)
+        if t2 > self.t1:
+            self.frame_rate = 1/(t2-self.t1)
 
-        self.root.after(1, self.update)
+        if root.conn != None:
+            self.root.after(1, self.update)
+        else:
+            self.root.after(1, self.update)
         
         pass
 
@@ -777,8 +1114,6 @@ class CS3D:
             # self.button_retract  = [tk.Button(self.frames[0]),   tk.Button(self.frames[1]),  tk.Button(self.frames[2]),  tk.Button(self.frames[3])]
             # self.button_start    = [tk.Button(self.frames[0]),   tk.Button(self.frames[1]),  tk.Button(self.frames[2]),  tk.Button(self.frames[3])]
             
-            
-        
     def get_start_button_configuration_from_motor(self, i):
         motor = self.motors[i]
         enabled = motor.enabled
@@ -786,6 +1121,7 @@ class CS3D:
         else:       configuration = self.enable_motor_configuration('stopped')
         # print(configuration)
         return configuration
+    
     def decode_motor_information(self, string, magic):
         motor_information = (None, None, None, None)
         if magic == -33: # normal processing
@@ -799,8 +1135,10 @@ class CS3D:
 
             # [2] - tracking information (passthrough from camera)
             tracking_information = values[2].split('&')
+            # print(' ')
             # print(tracking_information)
-            if len(tracking_information) < 8:
+            # print(' ')
+            if len(tracking_information) < 11:
                 return -1
             
         
@@ -810,8 +1148,11 @@ class CS3D:
             self.tracking_recieved_motor_init_handshake = bool(int(tracking_information[3]))
             self.tracking_stretch = float(tracking_information[4])
             self.tracking_found_max = bool(int(tracking_information[5]))
+            self.tracking_magnet_centroid = (int(tracking_information[6]), int(tracking_information[7]) )
+            self.tracking_post_centroid = (int(tracking_information[8]), int(tracking_information[9]) )
+            
             # self.tracking_maxes = json.loads(tracking_information[6])
-            self.magic = tracking_information[7]
+            self.magic = tracking_information[10]
             # print(tracking_information)
             # [3-7] - motor information
             motor_information = values[3:7]
@@ -869,6 +1210,9 @@ class CS3D:
             self.comm_time             = int(comm_time)
 
             if int(ttl_recieved) == 1 and self.ttl_received == 0:
+                self.got_ttl = True
+                if self.monitor_ttl_for_recording:
+                    self.begin_ttl_recording()
                 self.n_ttl += 1
             
 
@@ -882,10 +1226,14 @@ class CS3D:
         return -1
 
     def extract_magic_number(self, string):
-        magic = string.split(';')[0]
-        try: magic = int(magic)
-        except ValueError: magic = -99
-        return magic
+        if self.conn != None:
+            magic = string.split(';')[0]
+            try: magic = int(magic)
+            except ValueError: magic = -99
+            return magic
+        else:
+            magic = -99
+    
     def reset_camera_position(self):
         string = "V\n"
         self.write_to_motors(string)
@@ -900,13 +1248,16 @@ class CS3D:
             'text':'Camera Under\nRow {}'.format(self.well_labels[self.well_motor]),
             'borderwidth':7
         })
+
         printfunc('Reset Camera Position to Row D.')
+    
     def retract_all_motors(self):
         for i in range(4):
             string = "X{}\n".format(i)
             self.write_to_motors(string)
             self.root.after(1)
         printfunc("Retracting all Motors.")
+    
     def stop_all_motors(self):
         for i in range(4):
             string = "O{},0\n".format(i)
@@ -917,48 +1268,23 @@ class CS3D:
     def teardown_motors(self):
         self.write_to_motors("P1111,3000\n")
         self.root.after(1)
+
     def initialize_camera(self):
         if self.motors[self.well_motor].initialized == False:
-            string = 'INIT\n'
+            string = 'OMV,{}&INIT#\n'.format(self.well_motor)
             printfunc('Initializing camera.')
-            self.configure_button(self.button_initialize_camera, 'Reset\nCamera')
+            configure_button(self.button_initialize_camera, 'Reset\nCamera')
         else:
-            string = "OMV,{}&DEINIT\n".format(self.well_motor)
+            string = "OMV,{}&DEINIT#\n".format(self.well_motor)
             printfunc('Uninitializing camera.')
-            self.configure_button(self.button_initialize_camera, 'Initialize\nCamera')
+            configure_button(self.button_initialize_camera, 'Initialize\nCamera')
         self.write_to_motors(string)
-    def toggle_video_recording(self):
-        self.running_processing = not self.running_processing
-        self.save_image_as_video = not self.save_image_as_video
-        string = "OMV,{}&REMOVEPROCESSING\n".format(self.well_motor)
-        print(self.save_image_as_video)
-        if self.save_image_as_video:
-            self.configure_button(self.button_record_video, 'Recording', borderwidth=5)
-            self.time_of_recording = datetime.today().strftime("%Y%m%d_%H%M%S")
-            self.video_filename = 'data/{}_{}_videocapture_{}.avi'.format(self.plate_name_var.get(), self.name_var.get(), self.time_of_recording)
-            self.txt_filename = "data/{}_{}_video_information_{}.txt".format(self.plate_name_var.get(), self.name_var.get(), self.time_of_recording)
-            self.videowriter = cv2.VideoWriter(self.video_filename, 
-                         cv2.VideoWriter_fourcc('I','4','2','0'),
-                         self.frame_rate, self.image_size)
-            with open(self.txt_filename, 'w') as f:
-                f.write('global time (ms),well,motor time (ms),motor position (steps),max distance (steps),cycle count,TrigMode,TRIG,post X (px),post Y (px)\n')
-                
-            
-            
-            
-        else:
-            self.configure_button(self.button_record_video, 'Record\nVideo', borderwidth=2)
-            if self.videowriter is not None:
-                try:    self.videowriter.release()
-                except: pass
-                self.videowriter = None
-            
-
-        self.write_to_motors(string)
+     
     def home_motor(self):
         string = "MOTORINIT&{}\n".format(self.well_motor)
         self.write_to_motors(string)
         printfunc("Homing Motor.")
+    
     def send_adj(self, adj):
         string = "A{},{}\n".format(self.well_motor, adj)
         self.write_to_motors(string)
@@ -973,16 +1299,27 @@ class CS3D:
                     if not self.motors[self.well_motor].enabled:
                         self.post_manual = event.pos
                         self.write_to_motors("POSTMANUAL{},{}\n".format(self.post_manual[0], self.post_manual[1]))
-
+                # if event.button == 1:
+                #     self.making_post_or_magnet = "post"
+                #     self.make_a_rect = True
+                #     if self.rect_making == False:
+                #         self.x1, self.y1 = event.pos
+                #         self.x2, self.y2 = event.pos
+                #         self.rect_making = True
                 if event.button == 3:
-                    if event.button == 3:
-                        self.make_a_rect = True
-                        if self.rect_making == False:
-                            self.x1, self.y1 = event.pos
-                            self.x2, self.y2 = event.pos
-                            self.rect_making = True
+                    self.making_post_or_magnet = "post"
+                    self.make_a_rect = True
+                    if self.rect_making == False:
+                        self.x1, self.y1 = event.pos
+                        self.x2, self.y2 = event.pos
+                        self.rect_making = True
                     
             elif event.type == pygame.MOUSEBUTTONUP:
+                # if event.button == 1:
+                #     self.rect_making = False
+                #     self.make_a_rect = False
+                #     if self.x1 != self.x2 and self.y1 != self.y2:
+                #         self.write_to_motors("OMV,{}&POSTROI&{}&{}&{}&{}#\n".format(self.camera_well, min(self.x1, self.x2), max(self.x1, self.x2), min(self.y1, self.y2), max(self.y1, self.y2)))
                 if event.button == 3:
                     self.rect_making = False
                     self.make_a_rect = False
@@ -998,16 +1335,17 @@ class CS3D:
                 if event.key == pygame.K_c: # C
                     pygame.image.save(self.image, "{}_capture_{}.png".format(self.well_labels[self.well_motor], datetime.today().strftime("%Y%m%d_%H%M%S")))
             
-
     def write_to_motors(self, string):
         if self.conn is not None:
             self.conn.write(string.encode())
             
             printfunc("{}: {}\n".format(round(time()-self.t0,1), string[:-1]))
         pass
-
+        
     def get_frame_buffer(self):
-        frame_buffer = pyopenmv.fb_dump()
+        frame_buffer = None
+        while frame_buffer == None:
+            frame_buffer = pyopenmv.fb_dump()
         if frame_buffer != None:
 
             self.gotImage = True
@@ -1027,12 +1365,11 @@ class CS3D:
             self.screen.blit(self.bottom_screen_font.render("D{},{}".format(self.well_motor, self.motors[self.well_motor].d), 1, (0,255,0)), (20,self.screen_size[1]-30))
             self.screen.blit(self.bottom_screen_font.render("P{}".format(self.motors[self.well_motor].p), 1, (255, 0, 255)), (20, self.screen_size[1]-20))
             
-            if self.save_image_as_video:
-            # if self.videowriter is not None:
-                self.videowriter.write(frame)
+            if self.recording: # if the recording flag is True
+                self.videowriter.write(frame) # write frame to video
                 with open(self.txt_filename, 'a') as f:
 
-                    f.write('{t},{well},{motor_t},{motor_p},{motor_d},{cycle_count},{ttl_mode},{ttl_received},{n_ttl},{post_x},{post_y},\n'.format(
+                    f.write('{t},{well},{motor_t},{motor_p},{motor_d},{cycle_count},{ttl_mode},{ttl_received},{n_ttl},{post_x},{post_y},{stretch:3.2f},{magnet_x},{magnet_y}\n'.format(
                         t = round((time() - self.t0)*1000, 6), 
                         well = self.well_labels[self.well_motor], 
                         motor_t = self.motors[self.well_motor].t,
@@ -1043,7 +1380,17 @@ class CS3D:
                         ttl_received = self.ttl_received,
                         n_ttl = self.n_ttl,
                         post_x = self.post_manual[0],
-                        post_y = self.post_manual[1]))
+                        post_y = self.post_manual[1],
+                        stretch = self.tracking_stretch,
+                        magnet_x = self.tracking_magnet_centroid[0],
+                        magnet_y = self.tracking_magnet_centroid[1]
+                        ))
+                    
+                if self.monitor_ttl_for_recording: # if the recording mode is by ttl, and recording is active
+                    if time() > self.time_of_recording + self.recording_time: # if the time of the recording exceeds recording time
+                        self.recording = False # turn off recording
+                        configure_button(self.button_record_by_ttl, 'Waiting\nfor TTL...', borderwidth=3) # configure button to show waiting
+            
             
             
             # self.screen.blit(self.font.render("FPS %.2f"%(fps), 1, (255, 0, 0)), (0, 0))            
@@ -1083,76 +1430,6 @@ class CS3D:
 
     def mainloop(self):
         self.root.mainloop()
-
-
-
-def printfunc(string, **kwargs):
-    print(string, **kwargs)
-
-
-# ESTABLISH CONNECTIONS
-class EstablishConnections:
-    def __init__(self):
-        self.connected_to_motors = False
-        self.connected_to_camera=False
-        self.conn = None
-
-        self.ports = comports()
-        [printfunc("{}: {} ({})".format(port, desc, hwid)) for port, desc, hwid in self.ports]
-        
-    
-    def connect_to_camera(self):
-        for port, desc, hwid in comports():
-            if 'OpenMV' in port or 'OpenMV' in desc or 'OpenMV' in hwid:
-                try:
-                    print('initing')
-                    pyopenmv.init(port, baudrate=921600, timeout=0.010)
-                    pyopenmv.set_timeout(1*2) # SD Cards can cause big hicups.
-                    pyopenmv.stop_script() # stop any script thats working
-                    pyopenmv.enable_fb(True) # enable frame buffer (NEEDS TO BE ENABLED TO GRAB FROM FRAME BUFFER)
-
-                    try:
-                        with open('D:/main.py', 'r') as f:
-                            script=f.read()
-                    except:
-                        print('errored')
-                        script = ""
-                    
-                    print(len(script))
-                    pyopenmv.exec_script(script) # Execute the script that's located in D:/main.py
-                    self.connected_to_camera = True
-                    printfunc("Connected to camera.")
-                except:
-                    self.connected_to_camera=False
-                    printfunc("Failed to connect to camera.")
-                continue
-            else:  
-                continue
-    def connect_to_motors(self):
-        for port, desc, hwid in comports():
-            print("{}, {}, {}".format(port, desc, hwid))
-        for port, desc, hwid in comports():
-            if 'OpenMV' in port or 'OpenMV' in desc or 'OpenMV' in hwid:
-                continue
-            elif 'Bluetooth' in port or 'Bluetooth' in desc or 'Bluetooth' in hwid:
-                continue
-            elif 'STMicroelectronics' in port or 'STMicroelectronics' in desc or 'STMicroelectronics' in hwid:
-                continue
-            else:  
-                try:
-                    self.conn = Serial(port, baudrate=2000000, timeout=0.01)
-                    self.connected_to_motors = True
-                    printfunc('Connected to motors. ')
-                    continue
-                except:
-                    self.conn = None
-                    self.connected_to_motors = False
-                    printfunc('Tried to connect but failed.  Trying another or exiting.')
-                    continue
-        return self.conn
-    
-    def close(self):
-        self.conn.close()
 
 if __name__ == "__main__":
     root = CS3D()
