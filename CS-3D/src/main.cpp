@@ -1154,8 +1154,10 @@ void loop() {
       }
     if (enableState[st] == LOW) { // MOTOR IS ENABLED
       if (timers[st] > period[st])  { // RESET TIMER IF PAST PERIOD LENGTH
+      if (motorInitState[st] <= 0) { // only do this if it's not initializing position
         timers[st] = 0;   
         cycle_count[st] = cycle_count[st] + 1; // increment number of cycles
+      }
       }
 
       if (n_cycles[st] != -1) { // if not inf loop
