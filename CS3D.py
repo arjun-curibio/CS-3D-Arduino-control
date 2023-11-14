@@ -205,6 +205,7 @@ class CS3D:
         self.n_ttl = 0
 
         self.frame_rate = 30
+        self.last_frame_rates = []
         self.tracking_t = 0
         # self.waveform_root.protocol("MW_DELETE_WINDOW", self.waveform_window_close)
         
@@ -695,7 +696,7 @@ class CS3D:
                 temp = " TTL"
             else:
                 temp = "OPEN"
-            printfunc("{}, trig: {}, n_TRIG: {}".format(temp, self.ttl_received, self.n_ttl), end='\r')
+            printfunc("{}, trig: {}, n_TRIG: {}, frame rate: {:4.1f}".format(temp, self.ttl_received, self.n_ttl, np.mean(self.last_frame_rates)), end='\r')
             # print(motor_info)
 
         if self.ports.connected_to_camera:
@@ -743,8 +744,12 @@ class CS3D:
             # pygame.draw.rect(screen, (255,255,255), pygame.rect.Rect(min(x1,x2), min(y1,y2), abs(x1-x2), abs(y1-y2)))
         
         t2 = time() - self.t0
-        if t2 > self.t:
-            self.frame_rate = 1/(t2-self.t)
+        if t2 > self.t and self.image is not None:
+            self.frame_rate = 1/(t2 - self.t)
+            if len(self.last_frame_rates) > 30:
+                self.last_frame_rates.pop(0)
+            self.last_frame_rates.append(self.frame_rate)
+        
 
         self.root.after(1, self.update)
         
@@ -939,7 +944,7 @@ class CS3D:
             self.txt_filename = "data/{}_{}_video_information_{}.txt".format(self.plate_name_var.get(), self.name_var.get(), self.time_of_recording)
             self.videowriter = cv2.VideoWriter(self.video_filename, 
                          cv2.VideoWriter_fourcc('I','4','2','0'),
-                         self.frame_rate, self.image_size)
+                         np.mean(self.last_frame_rates), self.image_size)
             with open(self.txt_filename, 'w') as f:
                 f.write('global time (ms),well,motor time (ms),motor position (steps),max distance (steps),cycle count,TrigMode,TRIG,post X (px),post Y (px)\n')
                 
